@@ -9,6 +9,7 @@ use crate::parser::cell::parse_cell_card_complete;
 use crate::parser::data::parse_data_card_complete;
 use crate::parser::surface::parse_surface_card_complete;
 use crate::preprocess::preprocess_mcnp;
+use std::collections::HashMap;
 use thiserror::Error;
 
 /// Error returned when parsing an MCNP input file fails.
@@ -22,6 +23,36 @@ pub enum ParseError {
 
     #[error("Error in Data Card at line {line_number}: {message}")]
     DataError { line_number: usize, message: String },
+}
+
+impl ParseError {
+    /// Returns the 1-based starting line number where the error occurred.
+    pub fn line_number(&self) -> usize {
+        match self {
+            ParseError::CellError { line_number, .. }
+            | ParseError::SurfaceError { line_number, .. }
+            | ParseError::DataError { line_number, .. } => *line_number,
+        }
+    }
+}
+
+/// 1-based line number mappings for parsed MCNP cards.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CardLineSpans {
+    /// Maps `CellCard::id` to its 1-based starting line number.
+    pub cell_lines: HashMap<u32, usize>,
+    /// Maps `SurfaceCard::id` to its 1-based starting line number.
+    pub surface_lines: HashMap<u32, usize>,
+    /// 1-based starting line numbers corresponding to `McnpInput::data_cards` by index.
+    pub data_card_lines: Vec<usize>,
+}
+
+/// Result of lossy MCNP parsing that recovers valid cards even when some cards fail to parse.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LossyParseResult {
+    pub input: McnpInput,
+    pub spans: CardLineSpans,
+    pub errors: Vec<ParseError>,
 }
 
 /// Parses a complete MCNP input string into an [`McnpInput`] AST.
@@ -63,6 +94,69 @@ pub fn parse_mcnp_input(input: &str) -> Result<McnpInput, ParseError> {
         surfaces,
         data_cards,
     })
+}
+
+/// Parses an MCNP input string in lossy mode, collecting valid cards, line number spans,
+/// and any card-level [`ParseError`]s without aborting on the first error.
+pub fn parse_mcnp_input_lossy(input: &str) -> LossyParseResult {
+    let pre = preprocess_mcnp(input);
+
+    let mut cells = Vec::with_capacity(pre.cell_cards.len());
+    let mut surfaces = Vec::with_capacity(pre.surface_cards.len());
+    let mut data_cards = Vec::with_capacity(pre.data_cards.len());
+    let mut spans = CardLineSpans::default();
+    let mut errors = Vec::new();
+
+    for card in &pre.cell_cards {
+        match parse_cell_card_complete(&card.text) {
+            Ok(parsed) => {
+                spans.cell_lines.insert(parsed.id, card.line_number);
+                cells.push(parsed);
+            }
+            Err(msg) => errors.push(ParseError::CellError {
+                line_number: card.line_number,
+                message: msg,
+            }),
+        }
+    }
+
+    for card in &pre.surface_cards {
+        match parse_surface_card_complete(&card.text) {
+            Ok(parsed) => {
+                spans.surface_lines.insert(parsed.id, card.line_number);
+                surfaces.push(parsed);
+            }
+            Err(msg) => errors.push(ParseError::SurfaceError {
+                line_number: card.line_number,
+                message: msg,
+            }),
+        }
+    }
+
+    for card in &pre.data_cards {
+        match parse_data_card_complete(&card.text) {
+            Ok(parsed) => {
+                spans.data_card_lines.push(card.line_number);
+                data_cards.push(parsed);
+            }
+            Err(msg) => errors.push(ParseError::DataError {
+                line_number: card.line_number,
+                message: msg,
+            }),
+        }
+    }
+
+    LossyParseResult {
+        input: McnpInput {
+            message: pre.message,
+            title: pre.title,
+            cells,
+            surfaces,
+            data_cards,
+        },
+        spans,
+        errors,
+    }
 }
 
 #[cfg(test)]
@@ -265,5 +359,31 @@ nps    1e5
             )
         });
         assert!(has_f5);
+    }
+
+    #[test]
+    fn test_parse_mcnp_input_lossy_and_spans() {
+        let sample = "\
+Lossy Parse Test
+1  1 -1.0  -10  imp:n=1
+bad_cell_id 1 -1.0 -20
+2  0        10  imp:n=0
+
+10 so 5.0
+20 px not_a_float
+
+mode n
+m1 1001.80c 1.0
+";
+        let res = parse_mcnp_input_lossy(sample);
+        assert_eq!(res.input.cells.len(), 2);
+        assert_eq!(res.input.surfaces.len(), 1);
+        assert_eq!(res.input.data_cards.len(), 2);
+        assert_eq!(res.errors.len(), 2);
+        assert_eq!(res.errors[0].line_number(), 3);
+        assert_eq!(res.errors[1].line_number(), 7);
+        assert_eq!(res.spans.cell_lines.get(&1), Some(&2));
+        assert_eq!(res.spans.cell_lines.get(&2), Some(&4));
+        assert_eq!(res.spans.surface_lines.get(&10), Some(&6));
     }
 }
