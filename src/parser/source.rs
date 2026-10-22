@@ -251,16 +251,20 @@ pub fn parse_sp_sb_body(id: u32, is_bias: bool, input: &str) -> IResult<&str, Da
         if let Ok((next_rem, func_id)) = mcnp_i32(rem) {
             if func_id < 0 {
                 let (final_rem, params) = parse_expanded_entries(next_rem)?;
+                let card = SpSbCard {
+                    id,
+                    content: SpSbContent::AnalyticFunction {
+                        function_id: func_id,
+                        params,
+                    },
+                };
                 return Ok((
                     final_rem,
-                    DataCard::SpSb(SpSbCard {
-                        id,
-                        is_bias,
-                        content: SpSbContent::AnalyticFunction {
-                            function_id: func_id,
-                            params,
-                        },
-                    }),
+                    if is_bias {
+                        DataCard::Sb(card)
+                    } else {
+                        DataCard::Sp(card)
+                    },
                 ));
             }
         }
@@ -292,13 +296,18 @@ pub fn parse_sp_sb_body(id: u32, is_bias: bool, input: &str) -> IResult<&str, Da
 
     let (rem, values) = parse_expanded_entries(rem)?;
 
+    let card = SpSbCard {
+        id,
+        content: SpSbContent::Probabilities { option, values },
+    };
+
     Ok((
         rem,
-        DataCard::SpSb(SpSbCard {
-            id,
-            is_bias,
-            content: SpSbContent::Probabilities { option, values },
-        }),
+        if is_bias {
+            DataCard::Sb(card)
+        } else {
+            DataCard::Sp(card)
+        },
     ))
 }
 
@@ -467,9 +476,8 @@ mod tests {
         let sp1 = parse_data_card_complete("sp1 d 0.0 0.25 2r 0.25").unwrap();
         assert_eq!(
             sp1,
-            DataCard::SpSb(SpSbCard {
+            DataCard::Sp(SpSbCard {
                 id: 1,
-                is_bias: false,
                 content: SpSbContent::Probabilities {
                     option: SpOption::Default,
                     values: vec![
@@ -487,9 +495,8 @@ mod tests {
         let sp2 = parse_data_card_complete("sp2 -21 1").unwrap();
         assert_eq!(
             sp2,
-            DataCard::SpSb(SpSbCard {
+            DataCard::Sp(SpSbCard {
                 id: 2,
-                is_bias: false,
                 content: SpSbContent::AnalyticFunction {
                     function_id: -21,
                     params: vec![Entry::Value(1.0)],
@@ -501,9 +508,8 @@ mod tests {
         let sb1 = parse_data_card_complete("sb1 0.0 1.0 2.0 4.0 8.0").unwrap();
         assert_eq!(
             sb1,
-            DataCard::SpSb(SpSbCard {
+            DataCard::Sb(SpSbCard {
                 id: 1,
-                is_bias: true,
                 content: SpSbContent::Probabilities {
                     option: SpOption::Default,
                     values: vec![
@@ -516,6 +522,21 @@ mod tests {
                 },
             })
         );
+
+        // Verify JSON serialization and roundtrip
+        let sp_json = serde_json::to_value(&sp2).unwrap();
+        assert!(sp_json.get("Sp").is_some());
+        assert!(sp_json.get("SpSb").is_none());
+        assert!(sp_json["Sp"].get("is_bias").is_none());
+        let sp_restored: DataCard = serde_json::from_value(sp_json).unwrap();
+        assert_eq!(sp_restored, sp2);
+
+        let sb_json = serde_json::to_value(&sb1).unwrap();
+        assert!(sb_json.get("Sb").is_some());
+        assert!(sb_json.get("SpSb").is_none());
+        assert!(sb_json["Sb"].get("is_bias").is_none());
+        let sb_restored: DataCard = serde_json::from_value(sb_json).unwrap();
+        assert_eq!(sb_restored, sb1);
     }
 
     #[test]

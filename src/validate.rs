@@ -509,27 +509,20 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
                     });
                 }
             }
-            DataCard::SpSb(sp) => {
+            DataCard::Sp(sp) => {
                 if sp.id == 0 || sp.id > 999 {
-                    let prefix = if sp.is_bias { "SB" } else { "SP" };
                     diagnostics.push(ValidationError {
                         code: ErrorCode::DataCardIdOutOfRange,
                         severity: Severity::Error,
                         category: ValidationCategory::IdRange,
                         line_number: line,
                         message: format!(
-                            "Source distribution ID {}{} is out of valid range (1..=999)",
-                            prefix, sp.id
+                            "Source distribution ID SP{} is out of valid range (1..=999)",
+                            sp.id
                         ),
                     });
                 }
-                let target_map = if sp.is_bias {
-                    &mut sb_cards
-                } else {
-                    &mut sp_cards
-                };
-                let prefix = if sp.is_bias { "SB" } else { "SP" };
-                if let Some((prev_idx, _)) = target_map.insert(sp.id, (idx, sp)) {
+                if let Some((prev_idx, _)) = sp_cards.insert(sp.id, (idx, sp)) {
                     let prev_line = data_line(prev_idx);
                     diagnostics.push(ValidationError {
                         code: ErrorCode::DuplicateDataCard,
@@ -538,10 +531,40 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
                         line_number: line,
                         message: match prev_line {
                             Some(pl) => format!(
-                                "Duplicate {}{} card (first defined at line {})",
-                                prefix, sp.id, pl
+                                "Duplicate SP{} card (first defined at line {})",
+                                sp.id, pl
                             ),
-                            None => format!("Duplicate {}{} card", prefix, sp.id),
+                            None => format!("Duplicate SP{} card", sp.id),
+                        },
+                    });
+                }
+            }
+            DataCard::Sb(sb) => {
+                if sb.id == 0 || sb.id > 999 {
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::DataCardIdOutOfRange,
+                        severity: Severity::Error,
+                        category: ValidationCategory::IdRange,
+                        line_number: line,
+                        message: format!(
+                            "Source distribution ID SB{} is out of valid range (1..=999)",
+                            sb.id
+                        ),
+                    });
+                }
+                if let Some((prev_idx, _)) = sb_cards.insert(sb.id, (idx, sb)) {
+                    let prev_line = data_line(prev_idx);
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::DuplicateDataCard,
+                        severity: Severity::Error,
+                        category: ValidationCategory::DuplicateId,
+                        line_number: line,
+                        message: match prev_line {
+                            Some(pl) => format!(
+                                "Duplicate SB{} card (first defined at line {})",
+                                sb.id, pl
+                            ),
+                            None => format!("Duplicate SB{} card", sb.id),
                         },
                     });
                 }
@@ -1315,8 +1338,11 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
                 }
             }
 
-            DataCard::SpSb(sp) => {
-                let prefix = if sp.is_bias { "SB" } else { "SP" };
+            DataCard::Sp(sp) | DataCard::Sb(sp) => {
+                let prefix = match card {
+                    DataCard::Sp(_) => "SP",
+                    _ => "SB",
+                };
                 if let SpSbContent::Probabilities { values, .. } = &sp.content {
                     let mut any_positive = false;
                     for e in values {

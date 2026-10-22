@@ -397,10 +397,13 @@ pub enum SpSbContent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpSbCard {
     pub id: u32,
-    /// `false` for `SPn`, `true` for `SBn`.
-    pub is_bias: bool,
     pub content: SpSbContent,
 }
+
+/// Type alias for `SP` (Source Probability) card.
+pub type SpCard = SpSbCard;
+/// Type alias for `SB` (Source Bias) card.
+pub type SbCard = SpSbCard;
 
 /// Option on a `DS<n>` Dependent Source card.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -593,8 +596,10 @@ pub enum DataCard {
     },
     /// Source information card (`si1 h 0 1 5 10`)
     Si(SiCard),
-    /// Source probability or bias card (`sp1 d ...` or `sb1 ...`)
-    SpSb(SpSbCard),
+    /// Source probability card (`sp1 d ...` or `sp1 -21 ...`)
+    Sp(SpCard),
+    /// Source bias card (`sb1 ...`)
+    Sb(SbCard),
     /// Dependent source distribution card (`ds1 s 10 11`)
     Ds(DsCard),
     /// Source comment card (`sc1 Fission neutron spectrum`)
