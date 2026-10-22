@@ -84,6 +84,11 @@ pub enum ErrorCode {
     InvalidCellParameterValue,
     MissingCellImportance,
     ImportanceCardLengthMismatch,
+    UnrecognizedCellParameter,
+    VoidCellWithDensity,
+    FilledCellWithMaterial,
+    LatticeCellMissingFill,
+    InvalidCellComplement,
 
     // Source Definition (E5xx / W5xx)
     MissingSourceDefinition,
@@ -156,6 +161,11 @@ impl ErrorCode {
             Self::InvalidCellParameterValue => "E403",
             Self::MissingCellImportance => "E404",
             Self::ImportanceCardLengthMismatch => "E405",
+            Self::UnrecognizedCellParameter => "E406",
+            Self::VoidCellWithDensity => "E407",
+            Self::FilledCellWithMaterial => "E408",
+            Self::LatticeCellMissingFill => "E409",
+            Self::InvalidCellComplement => "E410",
 
             Self::MissingSourceDefinition => "E501",
             Self::ConflictingSourceDefinitions => "E502",
@@ -231,6 +241,15 @@ const KNOWN_MCNP_DATA_PREFIXES: &[&str] = &[
     "tmp", "tr", "uran", "dm", "embed", "embee", "embeb", "embem", "embtb", "embdb", "embdf",
     "notrn", "pert", "ksen", "ksental", "nps", "ctme", "prdmp", "lost", "idum", "rdum", "za",
     "zb", "zc", "zd", "print", "talnp", "files", "dbcn", "rand", "dawwg", "splt",
+];
+
+/// Known standard MCNP cell parameter keywords.
+const KNOWN_MCNP_CELL_PARAMETERS: &[&str] = &[
+    "imp", "vol", "u", "trcl", "lat", "fill", "elpt", "tmp", "rho", "mat", "nonu", "pwt", "ext",
+    "fcl", "wwn", "dxc", "pd", "bbrm", "bbrem", "unc", "cosy", "bfld", "bflcl", "embed", "embee",
+    "embeb", "embem", "embtb", "embdb", "embdf", "vec", "vect", "dir", "seg", "rad", "tag", "smx",
+    "corr", "var", "trn", "cut", "geom", "wwge", "wwp", "wwe", "esplt", "tsplt", "splt", "vov",
+    "mgopt", "mesh", "bcat", "e", "t",
 ];
 
 /// Validates a parsed [`McnpInput`] AST and returns all detected errors and warnings.
@@ -779,42 +798,161 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
     for (idx, cell) in input.cells.iter().enumerate() {
         let line = cell_line(idx, cell.id);
 
-        match &cell.definition {
+        // Determine effective material and density (considering parameter overrides or base cell in LIKE BUT)
+        let (effective_mat, effective_density) = match &cell.definition {
             CellDefinition::Normal {
                 material_id,
                 density,
-                geometry,
+                ..
             } => {
-                if *material_id > 0 {
-                    used_materials.insert(*material_id);
-                    if !materials.contains_key(material_id) {
-                        diagnostics.push(ValidationError {
-                            code: ErrorCode::UndefinedMaterial,
-                            severity: Severity::Error,
-                            category: ValidationCategory::Reference,
-                            line_number: line,
-                            message: format!(
-                                "Cell {} references undefined material M{}",
-                                cell.id, material_id
-                            ),
-                        });
-                    }
-                    if let Some(d) = density {
-                        if *d == 0.0 {
-                            diagnostics.push(ValidationError {
-                                code: ErrorCode::ZeroDensityNonVoidCell,
-                                severity: Severity::Error,
-                                category: ValidationCategory::Cell,
-                                line_number: line,
-                                message: format!(
-                                    "Cell {} has non-void material M{} with zero density",
-                                    cell.id, material_id
-                                ),
-                            });
-                        }
+                let mut mat = *material_id;
+                let mut dens = *density;
+                for param in &cell.params {
+                    match param {
+                        CellParam::Material(m) => mat = *m,
+                        CellParam::Density(d) => dens = Some(*d),
+                        _ => {}
                     }
                 }
+                (mat, dens)
+            }
+            CellDefinition::LikeBut { base_cell_id } => {
+                let (base_mat, base_dens) = if let Some((_, base_cell)) = cell_map.get(base_cell_id) {
+                    match &base_cell.definition {
+                        CellDefinition::Normal {
+                            material_id,
+                            density,
+                            ..
+                        } => (*material_id, *density),
+                        CellDefinition::LikeBut { .. } => (0, None),
+                    }
+                } else {
+                    (0, None)
+                };
+                let mut mat = base_mat;
+                let mut dens = base_dens;
+                let mut mat_overridden = false;
+                let mut dens_overridden = false;
+                for param in &cell.params {
+                    match param {
+                        CellParam::Material(m) => {
+                            mat = *m;
+                            mat_overridden = true;
+                        }
+                        CellParam::Density(d) => {
+                            dens = Some(*d);
+                            dens_overridden = true;
+                        }
+                        _ => {}
+                    }
+                }
+                if mat_overridden && !dens_overridden && base_mat == 0 && mat > 0 {
+                    dens = None;
+                }
+                (mat, dens)
+            }
+        };
 
+        if effective_mat > 0 {
+            used_materials.insert(effective_mat);
+            if !materials.contains_key(&effective_mat) {
+                diagnostics.push(ValidationError {
+                    code: ErrorCode::UndefinedMaterial,
+                    severity: Severity::Error,
+                    category: ValidationCategory::Reference,
+                    line_number: line,
+                    message: format!(
+                        "Cell {} references undefined material M{}",
+                        cell.id, effective_mat
+                    ),
+                });
+            }
+            match effective_density {
+                Some(0.0) => {
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::ZeroDensityNonVoidCell,
+                        severity: Severity::Error,
+                        category: ValidationCategory::Cell,
+                        line_number: line,
+                        message: format!(
+                            "Cell {} has non-void material M{} with zero density",
+                            cell.id, effective_mat
+                        ),
+                    });
+                }
+                None => {
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::ZeroDensityNonVoidCell,
+                        severity: Severity::Error,
+                        category: ValidationCategory::Cell,
+                        line_number: line,
+                        message: format!(
+                            "Cell {} has non-void material M{} but no density is specified",
+                            cell.id, effective_mat
+                        ),
+                    });
+                }
+                _ => {}
+            }
+        } else {
+            // Void cell (material 0)
+            for param in &cell.params {
+                if let CellParam::Density(rho) = param {
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::VoidCellWithDensity,
+                        severity: Severity::Error,
+                        category: ValidationCategory::Cell,
+                        line_number: line,
+                        message: format!(
+                            "Cell {} is void (material 0) but specifies density RHO={}",
+                            cell.id, rho
+                        ),
+                    });
+                }
+            }
+        }
+
+        let has_fill = cell
+            .params
+            .iter()
+            .any(|p| matches!(p, CellParam::Fill { .. }));
+        if has_fill && effective_mat > 0 {
+            diagnostics.push(ValidationError {
+                code: ErrorCode::FilledCellWithMaterial,
+                severity: Severity::Error,
+                category: ValidationCategory::Cell,
+                line_number: line,
+                message: format!(
+                    "Cell {} has a FILL parameter but specifies non-void material M{} (filled cells must have material 0)",
+                    cell.id, effective_mat
+                ),
+            });
+        }
+
+        let lat_opt = cell.params.iter().find_map(|p| match p {
+            CellParam::Lattice(lat) => Some(*lat),
+            _ => None,
+        });
+        if let Some(lat) = lat_opt {
+            if !has_fill {
+                diagnostics.push(ValidationError {
+                    code: ErrorCode::LatticeCellMissingFill,
+                    severity: Severity::Error,
+                    category: ValidationCategory::Cell,
+                    line_number: line,
+                    message: format!(
+                        "Cell {} has lattice parameter LAT={} but is missing required FILL parameter",
+                        cell.id, lat
+                    ),
+                });
+            }
+        }
+
+        match &cell.definition {
+            CellDefinition::Normal {
+                geometry,
+                ..
+            } => {
                 validate_geometry_expr(
                     cell.id,
                     line,
@@ -951,6 +1089,18 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
                     }
                 }
                 CellParam::Universe(u) => {
+                    if *u < 0 || *u > MAX_MCNP_ID as i32 {
+                        diagnostics.push(ValidationError {
+                            code: ErrorCode::InvalidCellParameterValue,
+                            severity: Severity::Error,
+                            category: ValidationCategory::Cell,
+                            line_number: line,
+                            message: format!(
+                                "Cell {} has invalid universe U={} (must be in range 0..={})",
+                                cell.id, u, MAX_MCNP_ID
+                            ),
+                        });
+                    }
                     let abs_u = u.abs();
                     this_universe = Some(abs_u);
                     universe_cells.entry(abs_u).or_default().push(cell.id);
@@ -1047,9 +1197,182 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
                     }
                 }
                 CellParam::Fill { values, .. } => {
+                    if values.is_empty() {
+                        diagnostics.push(ValidationError {
+                            code: ErrorCode::InvalidCellParameterValue,
+                            severity: Severity::Error,
+                            category: ValidationCategory::Cell,
+                            line_number: line,
+                            message: format!("Cell {} specifies empty FILL parameter", cell.id),
+                        });
+                    }
                     extract_fill_universes(values, &mut filled_universes);
                 }
-                CellParam::Other { particles, key, .. } => {
+                CellParam::Other { particles, key, values } => {
+                    let clean_key = key.trim_start_matches('*').to_lowercase();
+                    let alpha_key: String = clean_key
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphabetic())
+                        .collect();
+
+                    if !KNOWN_MCNP_CELL_PARAMETERS.contains(&clean_key.as_str())
+                        && !KNOWN_MCNP_CELL_PARAMETERS.contains(&alpha_key.as_str())
+                    {
+                        diagnostics.push(ValidationError {
+                            code: ErrorCode::UnrecognizedCellParameter,
+                            severity: Severity::Error,
+                            category: ValidationCategory::Cell,
+                            line_number: line,
+                            message: format!(
+                                "Cell {} has unrecognized parameter keyword `{}`",
+                                cell.id, key
+                            ),
+                        });
+                    } else {
+                        if values.is_empty() {
+                            diagnostics.push(ValidationError {
+                                code: ErrorCode::InvalidCellParameterValue,
+                                severity: Severity::Error,
+                                category: ValidationCategory::Cell,
+                                line_number: line,
+                                message: format!(
+                                    "Cell {} parameter `{}` has no value specified",
+                                    cell.id, key
+                                ),
+                            });
+                        }
+
+                        match alpha_key.as_str() {
+                            "nonu" => {
+                                for v_str in values {
+                                    if let Ok(v) = v_str.parse::<i32>() {
+                                        if !matches!(v, 0..=2) {
+                                            diagnostics.push(ValidationError {
+                                                code: ErrorCode::InvalidCellParameterValue,
+                                                severity: Severity::Error,
+                                                category: ValidationCategory::Cell,
+                                                line_number: line,
+                                                message: format!(
+                                                    "Cell {} has invalid NONU={} (must be 0, 1, or 2)",
+                                                    cell.id, v
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            "pd" => {
+                                for v_str in values {
+                                    if let Ok(v) = v_str.parse::<f64>() {
+                                        if !(0.0..=1.0).contains(&v) {
+                                            diagnostics.push(ValidationError {
+                                                code: ErrorCode::InvalidCellParameterValue,
+                                                severity: Severity::Error,
+                                                category: ValidationCategory::Cell,
+                                                line_number: line,
+                                                message: format!(
+                                                    "Cell {} has invalid detector contribution PD={} (must be between 0.0 and 1.0)",
+                                                    cell.id, v
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            "pwt" => {
+                                for v_str in values {
+                                    if let Ok(v) = v_str.parse::<f64>() {
+                                        if v < 0.0 {
+                                            diagnostics.push(ValidationError {
+                                                code: ErrorCode::InvalidCellParameterValue,
+                                                severity: Severity::Error,
+                                                category: ValidationCategory::Cell,
+                                                line_number: line,
+                                                message: format!(
+                                                    "Cell {} has negative photon production weight PWT={}",
+                                                    cell.id, v
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            "fcl" => {
+                                for v_str in values {
+                                    if let Ok(v) = v_str.parse::<f64>() {
+                                        if !(-1.0..=1.0).contains(&v) {
+                                            diagnostics.push(ValidationError {
+                                                code: ErrorCode::InvalidCellParameterValue,
+                                                severity: Severity::Error,
+                                                category: ValidationCategory::Cell,
+                                                line_number: line,
+                                                message: format!(
+                                                    "Cell {} has invalid forced collision parameter FCL={} (must be between -1.0 and 1.0)",
+                                                    cell.id, v
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            "wwn" => {
+                                for v_str in values {
+                                    if let Ok(v) = v_str.parse::<f64>() {
+                                        if v < 0.0 {
+                                            diagnostics.push(ValidationError {
+                                                code: ErrorCode::InvalidCellParameterValue,
+                                                severity: Severity::Error,
+                                                category: ValidationCategory::Cell,
+                                                line_number: line,
+                                                message: format!(
+                                                    "Cell {} has negative weight window bound WWN={}",
+                                                    cell.id, v
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            "dxc" => {
+                                for v_str in values {
+                                    if let Ok(v) = v_str.parse::<f64>() {
+                                        if !(0.0..=1.0).contains(&v) {
+                                            diagnostics.push(ValidationError {
+                                                code: ErrorCode::InvalidCellParameterValue,
+                                                severity: Severity::Error,
+                                                category: ValidationCategory::Cell,
+                                                line_number: line,
+                                                message: format!(
+                                                    "Cell {} has invalid DXTRAN contribution DXC={} (must be between 0.0 and 1.0)",
+                                                    cell.id, v
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            "elpt" => {
+                                for v_str in values {
+                                    if let Ok(v) = v_str.parse::<f64>() {
+                                        if v < 0.0 {
+                                            diagnostics.push(ValidationError {
+                                                code: ErrorCode::InvalidCellParameterValue,
+                                                severity: Severity::Error,
+                                                category: ValidationCategory::Cell,
+                                                line_number: line,
+                                                message: format!(
+                                                    "Cell {} has negative energy cutoff ELPT={}",
+                                                    cell.id, v
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
                     for p in particles {
                         check_particle_in_mode(
                             p,
@@ -1096,7 +1419,18 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
     let mut univ_adj: HashMap<i32, Vec<(i32, u32, Option<usize>)>> = HashMap::new();
     for (c_id, line, u_opt, filled_list) in &cell_fills {
         for &target_u in filled_list {
-            if target_u > 0 && !universe_cells.contains_key(&target_u) {
+            if target_u == 0 {
+                diagnostics.push(ValidationError {
+                    code: ErrorCode::InvalidCellParameterValue,
+                    severity: Severity::Error,
+                    category: ValidationCategory::Cell,
+                    line_number: *line,
+                    message: format!(
+                        "Cell {} specifies invalid fill universe FILL=0 (root universe 0 cannot fill a cell)",
+                        c_id
+                    ),
+                });
+            } else if !universe_cells.contains_key(&target_u) {
                 diagnostics.push(ValidationError {
                     code: ErrorCode::UndefinedUniverse,
                     severity: Severity::Error,
@@ -2602,7 +2936,24 @@ fn validate_geometry_expr(
             }
         }
         GeometryExpr::ComplementCell(target_id) => {
-            if !cell_map.contains_key(target_id) {
+            if let Some((_, target_cell)) = cell_map.get(target_id) {
+                let is_filled = target_cell
+                    .params
+                    .iter()
+                    .any(|p| matches!(p, CellParam::Fill { .. }));
+                if is_filled {
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::InvalidCellComplement,
+                        severity: Severity::Error,
+                        category: ValidationCategory::Cell,
+                        line_number: line,
+                        message: format!(
+                            "Cell {} complements cell #{} which has a FILL parameter (cannot complement a universe-filled cell)",
+                            cell_id, target_id
+                        ),
+                    });
+                }
+            } else {
                 diagnostics.push(ValidationError {
                     code: ErrorCode::UndefinedCell,
                     severity: Severity::Error,
@@ -3080,5 +3431,65 @@ unknowncard 1 2 3
         assert!(codes.contains(&ErrorCode::InvalidFmeshConfiguration)); // FMESH4 imesh 10 > 5 & iints=0
         assert!(codes.contains(&ErrorCode::UnrecognizedDataCard)); // unknowncard
         assert!(codes.contains(&ErrorCode::MissingSourceDefinition)); // no SDEF or KCODE
+    }
+
+    #[test]
+    fn test_user_reported_exterior_graveyard_cell() {
+        let sample = "\
+Cell Card Validation - Exterior Graveyard
+1   1 -1.0 -90                 imp:n=1.0 imp:p=1.0
+99  0       90                 imp:n=0.0 imp:p=0.0 Exterior graveyard
+
+90  so 100.0
+
+mode n p
+m1  1001.80c 1.0
+sdef pos=0 0 0
+";
+        let res = parse_mcnp_input_lossy(sample);
+        assert!(res.errors.is_empty(), "Parse errors: {:?}", res.errors);
+        let diags = validate_mcnp_input(&res.input, &res.spans);
+        let unrecognized: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == ErrorCode::UnrecognizedCellParameter)
+            .collect();
+        assert_eq!(
+            unrecognized.len(),
+            1,
+            "Expected 1 UnrecognizedCellParameter diagnostic, got: {:?}",
+            diags
+        );
+        assert_eq!(unrecognized[0].severity, Severity::Error);
+        assert!(unrecognized[0].message.contains("exterior"));
+    }
+
+    #[test]
+    fn test_enhanced_cell_card_validation() {
+        let sample = "\
+Enhanced Cell Card Validation Test
+1  0  -10  rho=-1.0  imp:n=1.0
+2  1 -2.7  -20  fill=1  imp:n=1.0
+3  0  -30  lat=1  imp:n=1.0
+4  0  #2   imp:n=1.0
+5  0  -40  u=-5  fill=0  nonu=3  pd=1.5  pwt=-0.5  fcl=2.0  wwn=-1.0  dxc=1.5  elpt=-1.0  imp:n=1.0
+
+10  so 10.0
+20  so 20.0
+30  so 30.0
+40  so 40.0
+
+mode n
+m1  1001.80c 1.0
+sdef pos=0 0 0
+";
+        let res = parse_mcnp_input_lossy(sample);
+        let diags = validate_mcnp_input(&res.input, &res.spans);
+        let codes: Vec<ErrorCode> = diags.iter().map(|d| d.code).collect();
+
+        assert!(codes.contains(&ErrorCode::VoidCellWithDensity)); // Cell 1 specifies rho=-1.0 for void cell
+        assert!(codes.contains(&ErrorCode::FilledCellWithMaterial)); // Cell 2 has fill=1 with material 1
+        assert!(codes.contains(&ErrorCode::LatticeCellMissingFill)); // Cell 3 has lat=1 without fill
+        assert!(codes.contains(&ErrorCode::InvalidCellComplement)); // Cell 4 complements filled cell #2
+        assert!(codes.contains(&ErrorCode::InvalidCellParameterValue)); // Cell 5 u=-5, fill=0, nonu=3, etc.
     }
 }

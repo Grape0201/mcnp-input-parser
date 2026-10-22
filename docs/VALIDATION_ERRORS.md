@@ -105,11 +105,16 @@ cargo run -- --validate path/to/input.i
 
 | コード | `ErrorCode` バリアント | 重要度 | 検出条件 | 具体例 / 備考 |
 | :--- | :--- | :---: | :--- | :--- |
-| **`E401`** | `ZeroDensityNonVoidCell` | `Error` | 非 Void セル（`material_id > 0`）の密度が `0.0` | `1 1 0.0 -10` または `RHO=0` |
+| **`E401`** | `ZeroDensityNonVoidCell` | `Error` | 非 Void セル（`material_id > 0`）の密度が `0.0`、または指定漏れ | `1 1 0.0 -10` または `RHO=0`、`LIKE n BUT MAT=1` で密度未指定 |
 | **`E402`** | `DuplicateCellParameter` | `Error` | 同一セル内で同じパラメータが重複指定されている | `1 0 -10 vol=5.0 vol=10.0` や同一粒子の `imp:n=1 imp:n=2` |
-| **`E403`** | `InvalidCellParameterValue` | `Error` | セルパラメータの値が制約外 | ・`LAT` が `1` または `2` 以外<br>・`VOL <= 0`、`TMP <= 0`、`IMP < 0`<br>・インライン `TRCL=(...)` の要素数が `1, 3, 5, 6, 9, 12, 13` 以外 |
+| **`E403`** | `InvalidCellParameterValue` | `Error` | セルパラメータの値が制約外 | ・`LAT` が `1` または `2` 以外、`U < 0`、`FILL=0`<br>・`VOL <= 0`、`TMP <= 0`、`IMP < 0`、`PWT < 0`、`WWN < 0`、`ELPT < 0`<br>・`NONU` が `0, 1, 2` 以外、`PD` / `DXC` が `[0.0, 1.0]` 外、`FCL` が `[-1.0, 1.0]` 外<br>・インライン `TRCL=(...)` の要素数が `1, 3, 5, 6, 9, 12, 13` 以外<br>・値が指定されていないセルパラメータ |
 | **`E404`** | `MissingCellImportance` | `Error` | 輸送対象粒子に対するセルの Importance (`IMP`) が欠落、または全セルで `IMP=0` | 一部のセルに `IMP:n` の指定漏れがある、または全セルが `IMP:n=0` |
 | **`E405`** | `ImportanceCardLengthMismatch` | `Error` | Block 3 の `IMP` または `WWNn` カードの要素数が全セル数と一致しない | セルが 5 個なのに `imp:n 1 1 0`（3個）しかない |
+| **`E406`** | `UnrecognizedCellParameter` | `Error` | MCNP の標準セルパラメータ一覧にない未知のパラメータキーワード | `99 0 90 imp:n=0 Exterior graveyard`（インラインコメントの `$` 忘れやタイポ） |
+| **`E407`** | `VoidCellWithDensity` | `Error` | Void セル（`material_id == 0`）に密度（`RHO=...`）が指定されている | `1 0 -10 rho=-1.0 imp:n=1` |
+| **`E408`** | `FilledCellWithMaterial` | `Error` | `FILL` で充填されるセルに非 Void 材料（`material_id > 0`）が指定されている | `1 1 -1.0 -10 fill=1`（充填セルは材料 0 の Void でなければならない） |
+| **`E409`** | `LatticeCellMissingFill` | `Error` | 格子セル（`LAT=1` または `LAT=2`）に必須の `FILL` パラメータが欠落している | `1 0 -10 lat=1 imp:n=1`（充填配列が未定義） |
+| **`E410`** | `InvalidCellComplement` | `Error` | `FILL` で充填されるセルを補集合（`#n`）で参照している | `2 0 #1 imp:n=1`（セル 1 は `FILL` を持つため補集合対象にできない） |
 
 ---
 
