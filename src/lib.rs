@@ -3,6 +3,11 @@ pub mod lexer;
 pub mod parser;
 pub mod preprocess;
 pub mod shortcut;
+pub mod validate;
+
+pub use crate::validate::{
+    validate_mcnp_input, ErrorCode, Severity, ValidationCategory, ValidationError,
+};
 
 use crate::ast::McnpInput;
 use crate::parser::cell::parse_cell_card_complete;
@@ -43,6 +48,10 @@ pub struct CardLineSpans {
     pub cell_lines: HashMap<u32, usize>,
     /// Maps `SurfaceCard::id` to its 1-based starting line number.
     pub surface_lines: HashMap<u32, usize>,
+    /// 1-based starting line numbers corresponding to `McnpInput::cells` by index.
+    pub cell_card_lines: Vec<usize>,
+    /// 1-based starting line numbers corresponding to `McnpInput::surfaces` by index.
+    pub surface_card_lines: Vec<usize>,
     /// 1-based starting line numbers corresponding to `McnpInput::data_cards` by index.
     pub data_card_lines: Vec<usize>,
 }
@@ -110,7 +119,8 @@ pub fn parse_mcnp_input_lossy(input: &str) -> LossyParseResult {
     for card in &pre.cell_cards {
         match parse_cell_card_complete(&card.text) {
             Ok(parsed) => {
-                spans.cell_lines.insert(parsed.id, card.line_number);
+                spans.cell_lines.entry(parsed.id).or_insert(card.line_number);
+                spans.cell_card_lines.push(card.line_number);
                 cells.push(parsed);
             }
             Err(msg) => errors.push(ParseError::CellError {
@@ -123,7 +133,11 @@ pub fn parse_mcnp_input_lossy(input: &str) -> LossyParseResult {
     for card in &pre.surface_cards {
         match parse_surface_card_complete(&card.text) {
             Ok(parsed) => {
-                spans.surface_lines.insert(parsed.id, card.line_number);
+                spans
+                    .surface_lines
+                    .entry(parsed.id)
+                    .or_insert(card.line_number);
+                spans.surface_card_lines.push(card.line_number);
                 surfaces.push(parsed);
             }
             Err(msg) => errors.push(ParseError::SurfaceError {

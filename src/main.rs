@@ -1,16 +1,17 @@
-use mcnp_input_parser::parse_mcnp_input;
+use mcnp_input_parser::{parse_mcnp_input, parse_mcnp_input_lossy, validate_mcnp_input, Severity};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::process;
 
 fn print_usage(program: &str) {
-    eprintln!("Usage: {} [--summary] [FILE]", program);
+    eprintln!("Usage: {} [--summary] [--validate] [FILE]", program);
     eprintln!();
     eprintln!("Arguments:");
     eprintln!("  [FILE]       Path to MCNP input file (reads from stdin if omitted)");
     eprintln!("Options:");
     eprintln!("  --summary    Print a human-readable summary instead of full JSON");
+    eprintln!("  --validate   Run syntax and semantic validation and report all errors/warnings");
     eprintln!("  -h, --help   Print this help message");
 }
 
@@ -19,6 +20,7 @@ fn main() {
     let program = args.first().map(|s| s.as_str()).unwrap_or("mcnp-input-parser");
 
     let mut summary_only = false;
+    let mut validate_mode = false;
     let mut file_path: Option<String> = None;
 
     for arg in args.iter().skip(1) {
@@ -29,6 +31,9 @@ fn main() {
             }
             "--summary" => {
                 summary_only = true;
+            }
+            "--validate" => {
+                validate_mode = true;
             }
             other if other.starts_with('-') => {
                 eprintln!("Unknown option: {}", other);
@@ -58,6 +63,34 @@ fn main() {
             buf
         }
     };
+
+    if validate_mode {
+        let lossy = parse_mcnp_input_lossy(&content);
+        let diagnostics = validate_mcnp_input(&lossy.input, &lossy.spans);
+        for err in &lossy.errors {
+            println!("[SYNTAX] {}", err);
+        }
+        for diag in &diagnostics {
+            println!("{}", diag);
+        }
+        let error_count = lossy.errors.len()
+            + diagnostics
+                .iter()
+                .filter(|d| d.severity == Severity::Error)
+                .count();
+        let warning_count = diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .count();
+        println!(
+            "Validation complete: {} error(s), {} warning(s).",
+            error_count, warning_count
+        );
+        if error_count > 0 {
+            process::exit(1);
+        }
+        return;
+    }
 
     let ast = match parse_mcnp_input(&content) {
         Ok(ast) => ast,
