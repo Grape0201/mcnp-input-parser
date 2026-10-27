@@ -1458,6 +1458,7 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
     // 5. Data Cards Validation (Materials, Tallies, Sources, VR, Physics)
     // ========================================================================
     let mut referenced_dists: Vec<(u32, Option<usize>, String)> = Vec::new();
+    let mut vector_dist_ids: HashSet<u32> = HashSet::new();
 
     for (idx, card) in input.data_cards.iter().enumerate() {
         let line = data_line(idx);
@@ -1548,6 +1549,9 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
                 for param in params {
                     match &param.value {
                         SdefValue::Distribution(d) => {
+                            if param.variable.is_vector() && *d > 0 {
+                                vector_dist_ids.insert(*d);
+                            }
                             referenced_dists.push((
                                 *d,
                                 line,
@@ -1555,6 +1559,9 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
                             ));
                         }
                         SdefValue::Function { dist_id, .. } => {
+                            if param.variable.is_vector() && *dist_id > 0 {
+                                vector_dist_ids.insert(*dist_id);
+                            }
                             referenced_dists.push((
                                 *dist_id,
                                 line,
@@ -1645,26 +1652,6 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
             }
 
             DataCard::Si(si) => {
-                if matches!(si.option, SiOption::Histogram | SiOption::ArbitraryPdf) {
-                    let mut vals = Vec::new();
-                    for e in &si.entries {
-                        if let SiEntry::Value(v) = e {
-                            vals.push(*v);
-                        }
-                    }
-                    if vals.len() >= 2 && !is_strictly_increasing(&vals) {
-                        diagnostics.push(ValidationError {
-                            code: ErrorCode::NonMonotonicSourceBins,
-                            severity: Severity::Error,
-                            category: ValidationCategory::Source,
-                            line_number: line,
-                            message: format!(
-                                "SI{} bin boundaries must be strictly increasing",
-                                si.id
-                            ),
-                        });
-                    }
-                }
                 for e in &si.entries {
                     if let SiEntry::Distribution(d) = e {
                         referenced_dists.push((*d, line, format!("SI{}", si.id)));
@@ -2327,6 +2314,42 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
         }
     }
 
+    // Propagate 3D vector distribution property through second-level SI (S option) and DS cards
+    loop {
+        let mut added = false;
+        let current_vec_ids: Vec<u32> = vector_dist_ids.iter().copied().collect();
+        for d_id in current_vec_ids {
+            if let Some(&(_, si)) = si_cards.get(&d_id) {
+                if si.option == SiOption::DistributionList {
+                    for e in &si.entries {
+                        if let SiEntry::Distribution(sub_d) = e {
+                            if *sub_d > 0 && vector_dist_ids.insert(*sub_d) {
+                                added = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(&(_, ds)) = ds_cards.get(&d_id) {
+                for e in &ds.entries {
+                    if let SiEntry::Distribution(sub_d) = e {
+                        if *sub_d > 0 && vector_dist_ids.insert(*sub_d) {
+                            added = true;
+                        }
+                    }
+                }
+                for &(_, sub_d) in &ds.pairs {
+                    if sub_d > 0 && vector_dist_ids.insert(sub_d) {
+                        added = true;
+                    }
+                }
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+
     // Check SI / SP / SB pairing and lengths
     let all_dist_ids: HashSet<u32> = si_cards
         .keys()
@@ -2343,6 +2366,30 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
         let sb_entry = sb_cards.get(&dist_id);
 
         if let Some(&(si_idx, si)) = si_entry {
+            let is_vector_coords =
+                vector_dist_ids.contains(&dist_id) && si.option != SiOption::DistributionList;
+
+            if !is_vector_coords && matches!(si.option, SiOption::Histogram | SiOption::ArbitraryPdf) {
+                let mut vals = Vec::new();
+                for e in &si.entries {
+                    if let SiEntry::Value(v) = e {
+                        vals.push(*v);
+                    }
+                }
+                if vals.len() >= 2 && !is_strictly_increasing(&vals) {
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::NonMonotonicSourceBins,
+                        severity: Severity::Error,
+                        category: ValidationCategory::Source,
+                        line_number: data_line(si_idx),
+                        message: format!(
+                            "SI{} bin boundaries must be strictly increasing",
+                            si.id
+                        ),
+                    });
+                }
+            }
+
             if sp_entry.is_none() {
                 diagnostics.push(ValidationError {
                     code: ErrorCode::IncompleteSourceDistribution,
@@ -2357,21 +2404,39 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
             } else if let Some(&(sp_idx, sp)) = sp_entry {
                 if let SpSbContent::Probabilities { option, values } = &sp.content {
                     if *option != SpOption::Volume {
-                        if values.len() != si.entries.len() {
-                            diagnostics.push(ValidationError {
-                                code: ErrorCode::SourceDistributionLengthMismatch,
-                                severity: Severity::Error,
-                                category: ValidationCategory::Source,
-                                line_number: data_line(sp_idx),
-                                message: format!(
+                        let expected_si_len = if is_vector_coords {
+                            values.len() * 3
+                        } else {
+                            values.len()
+                        };
+                        if si.entries.len() != expected_si_len {
+                            let message = if is_vector_coords {
+                                format!(
+                                    "SP{} has {} entries (expecting {} coordinate entries in SI{} for 3D vector distribution), but SI{} has {} entries",
+                                    dist_id,
+                                    values.len(),
+                                    expected_si_len,
+                                    dist_id,
+                                    dist_id,
+                                    si.entries.len()
+                                )
+                            } else {
+                                format!(
                                     "SP{} has {} entries, but SI{} has {} entries",
                                     dist_id,
                                     values.len(),
                                     dist_id,
                                     si.entries.len()
-                                ),
+                                )
+                            };
+                            diagnostics.push(ValidationError {
+                                code: ErrorCode::SourceDistributionLengthMismatch,
+                                severity: Severity::Error,
+                                category: ValidationCategory::Source,
+                                line_number: data_line(sp_idx),
+                                message,
                             });
-                        } else if si.option == SiOption::Histogram {
+                        } else if !is_vector_coords && si.option == SiOption::Histogram {
                             if let Some(Entry::Value(first_v)) = values.first() {
                                 if *first_v != 0.0 {
                                     diagnostics.push(ValidationError {
@@ -2424,19 +2489,39 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
             if let (Some(&(_, si)), SpSbContent::Probabilities { values, .. }) =
                 (si_entry, &sb.content)
             {
-                if values.len() != si.entries.len() {
-                    diagnostics.push(ValidationError {
-                        code: ErrorCode::SourceDistributionLengthMismatch,
-                        severity: Severity::Error,
-                        category: ValidationCategory::Source,
-                        line_number: data_line(sb_idx),
-                        message: format!(
+                let is_vector_coords =
+                    vector_dist_ids.contains(&dist_id) && si.option != SiOption::DistributionList;
+                let expected_si_len = if is_vector_coords {
+                    values.len() * 3
+                } else {
+                    values.len()
+                };
+                if si.entries.len() != expected_si_len {
+                    let message = if is_vector_coords {
+                        format!(
+                            "SB{} has {} entries (expecting {} coordinate entries in SI{} for 3D vector distribution), but SI{} has {} entries",
+                            dist_id,
+                            values.len(),
+                            expected_si_len,
+                            dist_id,
+                            dist_id,
+                            si.entries.len()
+                        )
+                    } else {
+                        format!(
                             "SB{} has {} entries, but SI{} has {} entries",
                             dist_id,
                             values.len(),
                             dist_id,
                             si.entries.len()
-                        ),
+                        )
+                    };
+                    diagnostics.push(ValidationError {
+                        code: ErrorCode::SourceDistributionLengthMismatch,
+                        severity: Severity::Error,
+                        category: ValidationCategory::Source,
+                        line_number: data_line(sb_idx),
+                        message,
                     });
                 }
             }
@@ -3491,5 +3576,75 @@ sdef pos=0 0 0
         assert!(codes.contains(&ErrorCode::LatticeCellMissingFill)); // Cell 3 has lat=1 without fill
         assert!(codes.contains(&ErrorCode::InvalidCellComplement)); // Cell 4 complements filled cell #2
         assert!(codes.contains(&ErrorCode::InvalidCellParameterValue)); // Cell 5 u=-5, fill=0, nonu=3, etc.
+    }
+
+    #[test]
+    fn test_vector_source_distribution_pos_axs_vec() {
+        // 1. Valid 3D vector distribution without explicit `L` option (2 points = 6 entries in SI2, 2 in SP2)
+        let valid_without_l = "\
+Valid POS=D2 without L
+1  0  -1  imp:n=1.0
+2  0   1  imp:n=0.0
+
+1  so 10.0
+
+mode n
+sdef pos=d2
+si2   0.0 0.0 0.0 1.0 1.0 1.0
+sp2 1 1
+";
+        let res = parse_mcnp_input_lossy(valid_without_l);
+        let diags = validate_mcnp_input(&res.input, &res.spans);
+        assert!(
+            diags.is_empty(),
+            "Expected no errors for valid POS=D2 without L, got: {:?}",
+            diags
+        );
+
+        // 2. Valid 3D vector distribution with explicit `L` option and second-level sampling (SI S)
+        let valid_with_l_and_nested = "\
+Valid POS=D2 with L and nested SI S
+1  0  -1  imp:n=1.0
+2  0   1  imp:n=0.0
+
+1  so 10.0
+
+mode n
+sdef pos=d2 axs=d3
+si2  l  0.0 0.0 0.0  1.0 1.0 1.0
+sp2     0.5          0.5
+sb2     0.5          0.5
+si3  s  10 11
+sp3     0.4 0.6
+si10    0 0 1  0 1 0
+sp10    1      1
+si11 l  1 0 0  0 0 -1  0 -1 0
+sp11    1      1       1
+";
+        let res2 = parse_mcnp_input_lossy(valid_with_l_and_nested);
+        let diags2 = validate_mcnp_input(&res2.input, &res2.spans);
+        assert!(
+            diags2.is_empty(),
+            "Expected no errors for nested vector distributions, got: {:?}",
+            diags2
+        );
+
+        // 3. Invalid 3D vector distribution where SI length != 3 * SP length
+        let invalid_len = "\
+Invalid POS=D2 length
+1  0  -1  imp:n=1.0
+2  0   1  imp:n=0.0
+
+1  so 10.0
+
+mode n
+sdef pos=d2
+si2   0.0 0.0 0.0 1.0
+sp2 1 1
+";
+        let res3 = parse_mcnp_input_lossy(invalid_len);
+        let diags3 = validate_mcnp_input(&res3.input, &res3.spans);
+        assert_eq!(diags3.len(), 1);
+        assert_eq!(diags3[0].code, ErrorCode::SourceDistributionLengthMismatch);
     }
 }

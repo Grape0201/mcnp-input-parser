@@ -127,8 +127,8 @@ cargo run -- --validate path/to/input.i
 | **`W503`** | `MissingKsrcForKcode` | `Warning` | `KCODE` が指定されているが初期線源点 `KSRC` が存在しない | `SRCTP` ファイルを使用しない場合はエラーになるため警告 |
 | **`E504`** | `UndefinedSourceDistribution` | `Error` | `SDEF`, `SIn`, `DSn` から未定義の分布番号 `Dn` を参照している | `sdef erg=d5` だが `SI5`/`SP5`/`DS5` が未定義 |
 | **`E505`** | `IncompleteSourceDistribution` | `Error` | `SIn`, `SPn`, `SBn` のペアが欠けている | ・`SIn` があるが `SPn` がない<br>・関数でない `SPn` があるが `SIn` がない<br>・`SBn` があるが `SPn` がない |
-| **`E506`** | `SourceDistributionLengthMismatch` | `Error` | `SIn` と `SPn` / `SBn` の要素数が一致しない、またはヒストグラム先頭確率が `0.0` でない | ・`SI1 H` が 4 要素なのに `SP1` が 3 要素<br>・`SI1 H` に対する `SP1 D` の第1要素が `0.0` でない |
-| **`E507`** | `NonMonotonicSourceBins` | `Error` | `SIn`（`H` または `A` オプション）のビン境界が狭義単調増加していない | `si1 h 0.0 5.0 2.0 10.0` |
+| **`E506`** | `SourceDistributionLengthMismatch` | `Error` | `SIn` と `SPn` / `SBn` の要素数が一致しない（3次元ベクトル分布では `3:1` でない）、またはヒストグラム先頭確率が `0.0` でない | ・`SI1 H` が 4 要素なのに `SP1` が 3 要素<br>・`POS`/`AXS`/`VEC`/`LOC` 用の `SI2` の要素数が `SP2` の3倍でない<br>・`SI1 H` に対する `SP1 D` の第1要素が `0.0` でない |
+| **`E507`** | `NonMonotonicSourceBins` | `Error` | 1次元スカラー分布の `SIn`（`H` または `A` オプション）のビン境界が狭義単調増加していない | `si1 h 0.0 5.0 2.0 10.0`（3次元ベクトル座標リストは対象外） |
 | **`E508`** | `InvalidSourceProbability` | `Error` | `SPn` / `SBn` の確率値に負数が含まれる、または正の確率が1つもない | `sp1 d 0.0 -0.5 0.5` または全要素 `0.0` |
 
 ---

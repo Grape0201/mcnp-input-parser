@@ -91,12 +91,7 @@ fn convert_sdef_value(var: &SdefVariable, tokens: &[String]) -> SdefValue {
                     return SdefValue::Scalar(v);
                 }
             }
-            if entries.len() == 3
-                && matches!(
-                    var,
-                    SdefVariable::Pos | SdefVariable::Axs | SdefVariable::Vec | SdefVariable::Loc
-                )
-            {
+            if entries.len() == 3 && var.is_vector() {
                 if let (Some(x), Some(y), Some(z)) =
                     (entries[0].as_f64(), entries[1].as_f64(), entries[2].as_f64())
                 {

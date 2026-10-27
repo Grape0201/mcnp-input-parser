@@ -313,6 +313,11 @@ impl SdefVariable {
             other => Self::Custom(other.to_string()),
         }
     }
+
+    /// Returns `true` if this variable represents a 3-component vector (`POS`, `AXS`, `VEC`, `LOC`).
+    pub fn is_vector(&self) -> bool {
+        matches!(self, Self::Pos | Self::Axs | Self::Vec | Self::Loc)
+    }
 }
 
 /// Typed value of an `SDEF` parameter.
