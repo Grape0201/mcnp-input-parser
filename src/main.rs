@@ -23,6 +23,7 @@ fn print_usage(program: &str) {
     eprintln!("  --template [TOPIC]     Print MCNP card templates / reference snippets (omit TOPIC to list all topics)");
     eprintln!("  --summary              Print a brief card count summary instead of full AST JSON");
     eprintln!("  --json                 Format output of --validate, --symbols, or --inspect as JSON");
+    eprintln!("  --lsp                  Start the MCNP Language Server (LSP) over stdio");
     eprintln!("  -h, --help             Print this help message");
 }
 
@@ -57,6 +58,7 @@ fn main() {
     let mut validate_mode = false;
     let mut symbols_mode = false;
     let mut json_mode = false;
+    let mut lsp_mode = false;
     let mut inspect_query: Option<String> = None;
     let mut template_mode = false;
     let mut template_topic: Option<String> = None;
@@ -80,6 +82,9 @@ fn main() {
             }
             "--json" => {
                 json_mode = true;
+            }
+            "--lsp" => {
+                lsp_mode = true;
             }
             "--inspect" => {
                 if i + 1 >= args.len() {
@@ -106,6 +111,15 @@ fn main() {
             }
         }
         i += 1;
+    }
+
+    if lsp_mode {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to initialize Tokio runtime for LSP server");
+        rt.block_on(mcnp_input_parser::lsp::run_lsp_stdio());
+        return;
     }
 
     if template_mode {

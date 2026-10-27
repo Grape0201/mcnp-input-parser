@@ -70,7 +70,30 @@ cargo run -- --template macrobodies
 # 各照会結果を JSON で取得（AI エージェントや外部ツール連携向け）
 cargo run -- --validate --json /path/to/mcnp_input.inp
 cargo run -- --symbols --json /path/to/mcnp_input.inp
+
+# Language Server (LSP) の起動 (stdio)
+cargo run --bin mcnp-lsp
+# または
+cargo run -- --lsp
 ```
+
+---
+
+## Language Server (`mcnp-lsp`)
+
+`tower-lsp` を用いた MCNP 入力ファイル用の Language Server (`mcnp-lsp`) を同梱しています。VS Code、Neovim、Helix 等の LSP クライアントから標準入出力（stdio）経由で接続できます。
+
+- **Diagnostics (`textDocument/publishDiagnostics`)**:
+  - 構文エラーおよびセマンティック検証エラー・警告（未定義の Surface / Material / Cell / Universe / Transform、ビン境界の非単調増加、`SI`/`SP` の要素数不一致、`IMP` の漏れ等）をリアルタイムに検出し、具体的な修正ヒント (`Hint: ...`) を表示します。
+- **Hover (`textDocument/hover`)**:
+  - カーソル下の Cell、Surface、Material (`m1`, `mt1`、またはセル定義の第2トークン)、Universe (`u=`, `fill=`)、Transform (`tr1`, `trcl=`)、Tally (`f4`, `fmesh14`, `e4`, `fm4` 等)、Distribution (`d1`, `si1`, `sp1` 等) をブロック文脈から自動判別し、定義サマリーと参照箇所一覧を表示します。
+  - サーフェス・マクロボディのニーモニック (`so`, `px`, `rpp`, `rcc` 等) や主要データカード (`mode`, `sdef`, `kcode`, `wwg` 等) の上ではパラメータ仕様・ファセット番号リファレンスを表示します。
+- **Go to Definition (`textDocument/definition`) & Find References (`textDocument/references`)**:
+  - セルジオメトリ式内の面番号 (`-10`, `10.1`) や材料番号、`#cell`、`u=` / `fill=`、`sdef` の `erg=d1`、タリーターゲット等から定義行へのジャンプと全参照箇所の検索に対応しています。
+- **Document Symbols (`textDocument/documentSymbol`)**:
+  - `Block 1: Cells`、`Block 2: Surfaces`、`Materials`、`Tallies`、`Distributions` の階層アウトラインと次の空き ID を表示します。
+- **Completion (`textDocument/completion`)**:
+  - カーソル位置のブロックに応じ、衝突しない次の空き ID (`next_available_ids`) を使った新規カードスニペット、定義済みサーフェス参照、サーフェスニーモニック、骨格テンプレートの補完候補を提供します。
 
 ---
 
