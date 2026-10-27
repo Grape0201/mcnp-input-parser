@@ -1,10 +1,17 @@
+pub mod analysis;
 pub mod ast;
 pub mod lexer;
 pub mod parser;
 pub mod preprocess;
 pub mod shortcut;
+pub mod templates;
 pub mod validate;
 
+pub use crate::analysis::{
+    analyze_diagnostics, analyze_symbols, format_inspect_report, format_symbols_report,
+    format_validation_report, inspect_target, InspectReport, SymbolsReport, ValidationReport,
+};
+pub use crate::templates::{get_template, list_templates, TemplateTopic};
 pub use crate::validate::{
     validate_mcnp_input, ErrorCode, Severity, ValidationCategory, ValidationError,
 };

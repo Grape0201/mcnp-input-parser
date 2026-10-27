@@ -52,7 +52,36 @@ cat /path/to/mcnp_input.inp | cargo run
 
 # 各ブロックのカード数サマリーのみを表示
 cargo run -- --summary /path/to/mcnp_input.inp
+
+# 構文・セマンティック検証（行番号・エラーコード・具体的な修正ヒント付き）
+cargo run -- --validate /path/to/mcnp_input.inp
+
+# 定義済みシンボル一覧（Cell / Surface / Material / Universe / Tally 等）と次の空き ID 提案
+cargo run -- --symbols /path/to/mcnp_input.inp
+
+# 特定ターゲットの定義と全参照箇所（逆引き）を調査（c<id>, s<id>, m<id>, u<id>, f<id>, tr<id>, d<id>）
+cargo run -- --inspect s10 /path/to/mcnp_input.inp
+
+# カード構文・3ブロック骨格テンプレートの一覧表示と出力
+cargo run -- --template
+cargo run -- --template skeleton-sdef
+cargo run -- --template macrobodies
+
+# 各照会結果を JSON で取得（AI エージェントや外部ツール連携向け）
+cargo run -- --validate --json /path/to/mcnp_input.inp
+cargo run -- --symbols --json /path/to/mcnp_input.inp
 ```
+
+---
+
+## AI Harness Skill (`mcnp-input-helper`)
+
+本リポジトリには、Antigravity や Claude Code 等の AI ハーネスで **MCNP 入力ファイル用の LSP サーバ相当の補助** を行うための Skill が [`.agents/skills/mcnp-input-helper/`](.agents/skills/mcnp-input-helper/SKILL.md) に同梱されています。
+
+- **シンボル把握・ID 衝突回避 (`--symbols`)**: 既存ファイルの Cell / Surface / Material / Universe / Tally 構成と、安全に採番できる `Next Available IDs` を編集前に把握します。
+- **影響範囲・逆引き参照調査 (`--inspect`)**: 既存のサーフェスや材料、セルを変更・削除する前に、それを参照している全カード・行番号を特定します。
+- **構文テンプレート参照 (`--template`)**: マクロボディのファセット番号（`.1`〜`.8`）や `SDEF`/`SI`/`SP`、タリー類の正確な引数順序を参照します。
+- **自動検証・自己修正ループ (`--validate`)**: 生成・編集後に構文・セマンティック検証を実行し、`Hint` に基づいてエラーが 0 件になるまで自己修正します。
 
 ---
 
