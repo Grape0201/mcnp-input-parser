@@ -9,7 +9,7 @@ description: >-
 
 # MCNP Input Helper Skill (LSP Workflow for AI Agents)
 
-This skill equips you with [`mcnp-helper.sh`](./scripts/mcnp-helper.sh), a fast CLI powered by `mcnp-input-parser` that acts as a **Language Server (LSP)** for MCNP input decks:
+This skill uses the `mcnp-input-parser` CLI (assumed to be available in `PATH`) as a **Language Server (LSP)** for MCNP input decks:
 - **Document Symbols & Conflict-Free IDs** (`--symbols`)
 - **Go-to-Definition / Hover / Find References** (`--inspect <TARGET>`)
 - **Card & Skeleton Templates / Completion Snippets** (`--template [TOPIC]`)
@@ -24,7 +24,7 @@ This skill equips you with [`mcnp-helper.sh`](./scripts/mcnp-helper.sh), a fast 
 Never guess existing Cell, Surface, Material, Universe, or Tally IDs. Run `--symbols` first:
 
 ```bash
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --symbols path/to/input.inp
+mcnp-input-parser --symbols path/to/input.inp
 ```
 
 - Check the `=== Next Available IDs (Conflict-Free) ===` section at the bottom of the output whenever adding new Cells, Surfaces, Materials (`M<n>`), Universes (`U=<n>`), Transforms (`TR<n>`), Source Distributions (`D<n>`), or Tallies (`F<n>` / `FMESH<n>`).
@@ -32,8 +32,8 @@ Never guess existing Cell, Surface, Material, Universe, or Tally IDs. Run `--sym
 
 ```bash
 # Target syntax: c<id> (Cell), s<id> (Surface), m<id> (Material), u<id> (Universe), f<id> (Tally), tr<id> (Transform), d<id> (Distribution)
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --inspect s10 path/to/input.inp
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --inspect m1 path/to/input.inp
+mcnp-input-parser --inspect s10 path/to/input.inp
+mcnp-input-parser --inspect m1 path/to/input.inp
 ```
 
 ---
@@ -44,20 +44,19 @@ When generating a new MCNP input file from scratch or adding macrobodies, `SDEF`
 
 ```bash
 # List all available template topics:
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template
+mcnp-input-parser --template
 
 # Print a specific template or reference table:
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template skeleton-sdef
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template skeleton-kcode
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template macrobodies
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template surfaces
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template source
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template tallies
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --template variance-reduction
+mcnp-input-parser --template skeleton-sdef
+mcnp-input-parser --template skeleton-kcode
+mcnp-input-parser --template macrobodies
+mcnp-input-parser --template surfaces
+mcnp-input-parser --template source
+mcnp-input-parser --template tallies
+mcnp-input-parser --template variance-reduction
 ```
 
 For quick formatting rules (3-block blank line rules, continuation lines, density sign conventions, macrobody facet numbering), read [CARD_SYNTAX_CHEATSHEET.md](./references/CARD_SYNTAX_CHEATSHEET.md).
-For detailed descriptions of all error and warning codes (`E001`–`W904`), see [VALIDATION_ERRORS.md](../../../docs/VALIDATION_ERRORS.md).
 
 ---
 
@@ -66,7 +65,7 @@ For detailed descriptions of all error and warning codes (`E001`–`W904`), see 
 After **every** creation or modification of an MCNP input file, run `--validate`:
 
 ```bash
-.agents/skills/mcnp-input-helper/scripts/mcnp-helper.sh --validate path/to/input.inp
+mcnp-input-parser --validate path/to/input.inp
 ```
 
 1. **Zero Errors Required**: If `--validate` reports any `[SYNTAX]` or `[E...]` errors, read the `-> Hint:` attached to each diagnostic, edit the file to fix the issue, and re-run `--validate` until `0 error(s)` is achieved.
