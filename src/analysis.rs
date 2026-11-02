@@ -29,8 +29,8 @@ pub struct ValidationReport {
 }
 
 /// Generates an actionable remediation hint for a syntax error.
-fn hint_for_parse_error(err: &ParseError) -> String {
-    match err {
+fn hint_for_parse_error(err: &ParseError, has_extra_blank_lines: bool) -> String {
+    let base = match err {
         ParseError::CellError { message, .. } => {
             if message.contains("shortcut") || message.contains("repeat") || message.contains("interp") {
                 "Check MCNP shortcut syntax (e.g. `3R` requires a preceding value, `ILOG` requires positive bounds).".to_string()
@@ -39,7 +39,7 @@ fn hint_for_parse_error(err: &ParseError) -> String {
             }
         }
         ParseError::SurfaceError { .. } => {
-            "Surface card format is `[*/+]<id> [<tr_id>] <mnemonic> <params...>`. Ensure all parameters are valid floats and no blank lines appear inside Block 2.".to_string()
+            "Surface card format is `[*/+]<id> [<tr_id>] <mnemonic> <params...>`. Ensure all parameters are valid floats and no blank lines appear inside Block 1 or Block 2.".to_string()
         }
         ParseError::DataError { message, .. } => {
             if message.contains("KSRC") {
@@ -50,6 +50,14 @@ fn hint_for_parse_error(err: &ParseError) -> String {
                 "Check data card syntax and continuation lines (continuation lines must start with at least 5 spaces or follow a trailing `&`).".to_string()
             }
         }
+    };
+    if has_extra_blank_lines {
+        format!(
+            "{} (Note: extra blank lines were detected in this file [E004], which may have shifted this card into the wrong block—fix the blank lines first.)",
+            base
+        )
+    } else {
+        base
     }
 }
 
@@ -57,13 +65,16 @@ fn hint_for_parse_error(err: &ParseError) -> String {
 pub fn hint_for_validation_error(err: &ValidationError, input: &McnpInput) -> String {
     match err.code {
         ErrorCode::EmptyCellsBlock => {
-            "Add at least one cell card in Block 1 after the title line.".to_string()
+            "Add at least one cell card in Block 1 immediately after the title line (do NOT put a blank line right after the title line).".to_string()
         }
         ErrorCode::EmptySurfacesBlock => {
             "Ensure Block 1 and Block 2 are separated by a single blank line and Block 2 contains surface definitions.".to_string()
         }
         ErrorCode::EmptyDataBlock => {
             "Ensure Block 2 and Block 3 are separated by a single blank line and Block 3 contains data cards (MODE, SDEF/KCODE, M<n>, etc.).".to_string()
+        }
+        ErrorCode::UnexpectedBlankLine => {
+            "An MCNP input file must have EXACTLY 2 blank lines in total: one between Block 1 (Cells) and Block 2 (Surfaces), and one between Block 2 (Surfaces) and Block 3 (Data). Remove extra blank lines (after the title or inside blocks) or replace them with `c` comment lines.".to_string()
         }
         ErrorCode::CellIdOutOfRange | ErrorCode::SurfaceIdOutOfRange | ErrorCode::DataCardIdOutOfRange => {
             "Use positive integer IDs within MCNP limits (1..=99,999,999 for Cells/Surfaces/Materials/Tallies; 1..=999 for TR/SI/SP/SB/DS).".to_string()
@@ -236,9 +247,52 @@ pub fn analyze_diagnostics(content: &str) -> ValidationReport {
     let lossy = parse_mcnp_input_lossy(content);
     let semantic = validate_mcnp_input(&lossy.input, &lossy.spans);
 
+    // When extra/misplaced blank lines (`E004`) break the 3-block boundary structure,
+    // subsequent syntax and semantic errors are cascading false positives caused by
+    // cards being parsed in the wrong block or truncated after the 3rd blank line.
+    // Report only `E004` first so the user/agent fixes the blank-line delimiters cleanly.
+    if let Some(e004) = semantic
+        .iter()
+        .find(|d| d.code == ErrorCode::UnexpectedBlankLine)
+    {
+        return ValidationReport {
+            error_count: 1,
+            warning_count: 0,
+            diagnostics: vec![DiagnosticItem {
+                code: e004.code.as_str().to_string(),
+                severity: "Error".to_string(),
+                category: format!("{:?}", e004.category),
+                line_number: e004.line_number,
+                message: e004.message.clone(),
+                hint: hint_for_validation_error(e004, &lossy.input),
+            }],
+        };
+    }
+
     let mut diagnostics = Vec::with_capacity(lossy.errors.len() + semantic.len());
     let mut error_count = 0;
     let mut warning_count = 0;
+
+    for diag in semantic
+        .iter()
+        .filter(|d| d.category == crate::validate::ValidationCategory::Structure)
+    {
+        match diag.severity {
+            Severity::Error => error_count += 1,
+            Severity::Warning => warning_count += 1,
+        }
+        diagnostics.push(DiagnosticItem {
+            code: diag.code.as_str().to_string(),
+            severity: match diag.severity {
+                Severity::Error => "Error".to_string(),
+                Severity::Warning => "Warning".to_string(),
+            },
+            category: format!("{:?}", diag.category),
+            line_number: diag.line_number,
+            message: diag.message.clone(),
+            hint: hint_for_validation_error(diag, &lossy.input),
+        });
+    }
 
     for err in &lossy.errors {
         error_count += 1;
@@ -248,11 +302,14 @@ pub fn analyze_diagnostics(content: &str) -> ValidationReport {
             category: "Syntax".to_string(),
             line_number: Some(err.line_number()),
             message: err.to_string(),
-            hint: hint_for_parse_error(err),
+            hint: hint_for_parse_error(err, false),
         });
     }
 
-    for diag in &semantic {
+    for diag in semantic
+        .iter()
+        .filter(|d| d.category != crate::validate::ValidationCategory::Structure)
+    {
         match diag.severity {
             Severity::Error => error_count += 1,
             Severity::Warning => warning_count += 1,
@@ -2625,5 +2682,32 @@ mod tests {
         assert!(tally_rep.found);
         assert_eq!(tally_rep.definitions.len(), 1);
         assert_eq!(tally_rep.references.len(), 2); // FC4 and E4
+    }
+
+    #[test]
+    fn test_extra_blank_lines_reported_first_as_e004() {
+        let input_with_extra_blanks = "\
+Sphere Shielding Problem
+
+1 1 -7.87 -10 imp:n=1.0
+2 0 10 imp:n=0.0
+
+10 so 5.0
+
+mode n
+
+sdef pos=0 0 0 erg=14.1
+
+m1 26056.80c 1.0
+nps 10000
+";
+        let report = analyze_diagnostics(input_with_extra_blanks);
+        assert!(report.error_count > 0);
+        let first = &report.diagnostics[0];
+        assert_eq!(first.code, "E004");
+        assert_eq!(first.line_number, Some(2));
+        assert!(first.message.contains("[2, 5, 7, 9, 11]"));
+        assert!(first.message.contains("mode n"));
+        assert!(first.hint.contains("EXACTLY 2 blank lines"));
     }
 }

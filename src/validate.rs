@@ -51,6 +51,7 @@ pub enum ErrorCode {
     EmptyCellsBlock,
     EmptySurfacesBlock,
     EmptyDataBlock,
+    UnexpectedBlankLine,
 
     // ID Range & Duplicates (E1xx)
     CellIdOutOfRange,
@@ -132,6 +133,7 @@ impl ErrorCode {
             Self::EmptyCellsBlock => "E001",
             Self::EmptySurfacesBlock => "E002",
             Self::EmptyDataBlock => "E003",
+            Self::UnexpectedBlankLine => "E004",
 
             Self::CellIdOutOfRange => "E101",
             Self::SurfaceIdOutOfRange => "E102",
@@ -277,12 +279,83 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
     // ========================================================================
     // 1. Block Structure Checks
     // ========================================================================
+    let has_extra_blank_lines = spans.blank_line_numbers.len() > 2
+        || !spans.leading_blank_lines.is_empty()
+        || !spans.consecutive_blank_lines.is_empty()
+        || !spans.trailing_ignored_cards.is_empty();
+
+    if has_extra_blank_lines {
+        let primary_blank_line = spans
+            .leading_blank_lines
+            .first()
+            .or_else(|| spans.consecutive_blank_lines.first())
+            .or_else(|| spans.blank_line_numbers.get(2))
+            .or_else(|| spans.blank_line_numbers.first())
+            .copied();
+
+        let blanks_str = spans
+            .blank_line_numbers
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let mut msg = format!(
+            "Too many or misplaced blank lines: found {} blank line(s) at line(s) [{}], but MCNP requires EXACTLY 2 blank lines total (1 between Block 1 and Block 2, and 1 between Block 2 and Block 3)",
+            spans.blank_line_numbers.len(),
+            blanks_str
+        );
+
+        if !spans.leading_blank_lines.is_empty() {
+            let lead_str = spans
+                .leading_blank_lines
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            msg.push_str(&format!(
+                "; DELETE blank line(s) at line(s) [{}] immediately after the title/header comments (do NOT put a blank line before the first Cell card)",
+                lead_str
+            ));
+        }
+
+        if !spans.consecutive_blank_lines.is_empty() {
+            let consec_str = spans
+                .consecutive_blank_lines
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            msg.push_str(&format!(
+                "; DELETE consecutive blank line(s) at line(s) [{}]",
+                consec_str
+            ));
+        }
+
+        if let Some(first_ignored) = spans.trailing_ignored_cards.first() {
+            msg.push_str(&format!(
+                "; {} card(s) starting at line {} (`{}`) were ignored because they appear after the 3rd blank line",
+                spans.trailing_ignored_cards.len(),
+                first_ignored.line_number,
+                first_ignored.text
+            ));
+        }
+
+        diagnostics.push(ValidationError {
+            code: ErrorCode::UnexpectedBlankLine,
+            severity: Severity::Error,
+            category: ValidationCategory::Structure,
+            line_number: primary_blank_line,
+            message: msg,
+        });
+    }
+
     if input.cells.is_empty() {
         diagnostics.push(ValidationError {
             code: ErrorCode::EmptyCellsBlock,
             severity: Severity::Error,
             category: ValidationCategory::Structure,
-            line_number: None,
+            line_number: spans.blank_line_numbers.first().copied(),
             message: "Cell cards block (Block 1) is empty".to_string(),
         });
     }
@@ -291,7 +364,7 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
             code: ErrorCode::EmptySurfacesBlock,
             severity: Severity::Error,
             category: ValidationCategory::Structure,
-            line_number: None,
+            line_number: spans.blank_line_numbers.get(1).copied(),
             message: "Surface cards block (Block 2) is empty".to_string(),
         });
     }
@@ -300,7 +373,7 @@ pub fn validate_mcnp_input(input: &McnpInput, spans: &CardLineSpans) -> Vec<Vali
             code: ErrorCode::EmptyDataBlock,
             severity: Severity::Error,
             category: ValidationCategory::Structure,
-            line_number: None,
+            line_number: spans.blank_line_numbers.get(2).copied(),
             message: "Data cards block (Block 3) is empty".to_string(),
         });
     }

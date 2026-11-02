@@ -23,7 +23,7 @@ use crate::ast::McnpInput;
 use crate::parser::cell::parse_cell_card_complete;
 use crate::parser::data::parse_data_card_complete;
 use crate::parser::surface::parse_surface_card_complete;
-use crate::preprocess::preprocess_mcnp;
+use crate::preprocess::{preprocess_mcnp, LogicalCard};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -64,6 +64,14 @@ pub struct CardLineSpans {
     pub surface_card_lines: Vec<usize>,
     /// 1-based starting line numbers corresponding to `McnpInput::data_cards` by index.
     pub data_card_lines: Vec<usize>,
+    /// 1-based line numbers of non-trailing blank lines after the title card.
+    pub blank_line_numbers: Vec<usize>,
+    /// 1-based line numbers of blank lines appearing before the very first logical card.
+    pub leading_blank_lines: Vec<usize>,
+    /// 1-based line numbers of consecutive (2nd+) non-trailing blank lines.
+    pub consecutive_blank_lines: Vec<usize>,
+    /// Logical cards appearing after the 3rd blank line that MCNP ignores/truncates.
+    pub trailing_ignored_cards: Vec<LogicalCard>,
 }
 
 /// Result of lossy MCNP parsing that recovers valid cards even when some cards fail to parse.
@@ -123,7 +131,13 @@ pub fn parse_mcnp_input_lossy(input: &str) -> LossyParseResult {
     let mut cells = Vec::with_capacity(pre.cell_cards.len());
     let mut surfaces = Vec::with_capacity(pre.surface_cards.len());
     let mut data_cards = Vec::with_capacity(pre.data_cards.len());
-    let mut spans = CardLineSpans::default();
+    let mut spans = CardLineSpans {
+        blank_line_numbers: pre.blank_line_numbers,
+        leading_blank_lines: pre.leading_blank_lines,
+        consecutive_blank_lines: pre.consecutive_blank_lines,
+        trailing_ignored_cards: pre.trailing_ignored_cards,
+        ..Default::default()
+    };
     let mut errors = Vec::new();
 
     for card in &pre.cell_cards {

@@ -17,6 +17,21 @@ This skill uses the `mcnp-input-parser` CLI (assumed to be available in `PATH`) 
 
 ---
 
+## Essential MCNP Structure Rule: Blank Lines Are Block Delimiters
+
+In MCNP, a blank line is **not** visual whitespace—it is a **syntax delimiter that terminates the current block**.
+- An MCNP input file consists of a **Title line** followed by **3 blocks** separated by **exactly 2 single blank lines** in total:
+  1. **Title Line** (1st line of the file — **no blank line after the title**)
+  2. **Block 1: Cell Cards**
+  3. *(Single blank line)*
+  4. **Block 2: Surface Cards**
+  5. *(Single blank line)*
+  6. **Block 3: Data Cards** (`mode`, `sdef`/`kcode`, `m<n>`, `f<n>`, `nps`, etc.)
+- **Never put blank lines inside a block** (e.g., between `mode`, `sdef`, `m1`, and `f4`) or consecutive blank lines between blocks. Any extra blank line shifts subsequent cards into the wrong block or silently truncates the rest of the file.
+- Use `c` comment lines (`c --- Materials ---`) to visually separate sections within a block.
+
+---
+
 ## Standard Workflow
 
 ### Step 1: Before Editing an Existing MCNP File (Symbol & Reference Lookup)

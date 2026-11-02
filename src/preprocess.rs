@@ -15,6 +15,14 @@ pub struct PreprocessedInput {
     pub cell_cards: Vec<LogicalCard>,
     pub surface_cards: Vec<LogicalCard>,
     pub data_cards: Vec<LogicalCard>,
+    /// 1-based line numbers of non-trailing blank lines after the title card.
+    pub blank_line_numbers: Vec<usize>,
+    /// 1-based line numbers of blank lines appearing before the very first logical card (right after title/header comments).
+    pub leading_blank_lines: Vec<usize>,
+    /// 1-based line numbers of consecutive (2nd+) non-trailing blank lines.
+    pub consecutive_blank_lines: Vec<usize>,
+    /// Logical cards appearing after the 3rd blank line that MCNP ignores/truncates.
+    pub trailing_ignored_cards: Vec<LogicalCard>,
 }
 
 /// Checks if a raw line is an MCNP comment line (`C` or `c` in columns 1-5 followed by space or EOL).
@@ -133,6 +141,10 @@ pub fn preprocess_mcnp(input: &str) -> PreprocessedInput {
             cell_cards: Vec::new(),
             surface_cards: Vec::new(),
             data_cards: Vec::new(),
+            blank_line_numbers: Vec::new(),
+            leading_blank_lines: Vec::new(),
+            consecutive_blank_lines: Vec::new(),
+            trailing_ignored_cards: Vec::new(),
         };
     }
 
@@ -172,21 +184,48 @@ pub fn preprocess_mcnp(input: &str) -> PreprocessedInput {
         String::new()
     };
 
-    // 3. Split remaining lines by blank-line delimiters into up to 3 blocks
+    // 3. Split remaining lines by blank-line delimiters into up to 3 blocks,
+    // while tracking internal blank lines and any trailing cards after the 3rd blank line.
     let mut raw_blocks: Vec<Vec<(usize, &str)>> = Vec::new();
     let mut current_block: Vec<(usize, &str)> = Vec::new();
+    let mut trailing_raw: Vec<(usize, &str)> = Vec::new();
+
+    let mut blank_line_numbers: Vec<usize> = Vec::new();
+    let mut leading_blank_lines: Vec<usize> = Vec::new();
+    let mut consecutive_blank_lines: Vec<usize> = Vec::new();
+    let mut pending_blanks: Vec<(usize, bool)> = Vec::new();
+    let mut prev_was_blank = false;
+    let mut seen_any_card_line = false;
 
     while cursor < total {
         let (line_no, line) = numbered_lines[cursor];
         cursor += 1;
         if line.trim().is_empty() {
-            raw_blocks.push(std::mem::take(&mut current_block));
-            if raw_blocks.len() == 3 {
-                // Any lines after the 3rd block's terminating blank line are ignored in MCNP
-                break;
+            pending_blanks.push((line_no, prev_was_blank));
+            prev_was_blank = true;
+            if raw_blocks.len() < 3 {
+                raw_blocks.push(std::mem::take(&mut current_block));
             }
         } else {
-            current_block.push((line_no, line));
+            let is_card = !is_comment_line(line) && !strip_inline_comment(line).trim().is_empty();
+            for (b_line, is_consec) in pending_blanks.drain(..) {
+                blank_line_numbers.push(b_line);
+                if !seen_any_card_line {
+                    leading_blank_lines.push(b_line);
+                }
+                if is_consec {
+                    consecutive_blank_lines.push(b_line);
+                }
+            }
+            if is_card {
+                seen_any_card_line = true;
+            }
+            prev_was_blank = false;
+            if raw_blocks.len() < 3 {
+                current_block.push((line_no, line));
+            } else {
+                trailing_raw.push((line_no, line));
+            }
         }
     }
     if !current_block.is_empty() && raw_blocks.len() < 3 {
@@ -205,6 +244,7 @@ pub fn preprocess_mcnp(input: &str) -> PreprocessedInput {
         .get(2)
         .map(|b| extract_logical_cards(b))
         .unwrap_or_default();
+    let trailing_ignored_cards = extract_logical_cards(&trailing_raw);
 
     PreprocessedInput {
         message,
@@ -212,6 +252,10 @@ pub fn preprocess_mcnp(input: &str) -> PreprocessedInput {
         cell_cards,
         surface_cards,
         data_cards,
+        blank_line_numbers,
+        leading_blank_lines,
+        consecutive_blank_lines,
+        trailing_ignored_cards,
     }
 }
 
