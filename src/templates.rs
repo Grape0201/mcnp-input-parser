@@ -13,43 +13,25 @@ const TEMPLATES: &[TemplateTopic] = &[
         name: "skeleton-sdef",
         summary: "Minimal complete 3-block MCNP input for Fixed-Source / Shielding (SDEF)",
         content: "\
-Fixed-Source Shielding Skeleton
+MCNP Fixed-Source Working Skeleton
 c ======================================================================
-c Block 1: Cell Cards (id mat density geometry params)
-c - Blank line terminates Block 1 (DO NOT put blank lines inside a block)
-c - Continuation line: 5+ leading spaces OR trailing '&'
+c Block 1: Cell Cards (<id> <mat> [<density>] <geom> <params>)
 c ======================================================================
-1  0          -10      imp:n,p=1.0            $ Inner void source region
-2  1 -7.87     10 -20  imp:n,p=1.0            $ Iron shield shell
-3  2 -0.0012   20 -90  imp:n,p=1.0            $ Air region around shield
-99 0           90      imp:n,p=0.0            $ Exterior graveyard (imp=0)
+1  1 -1.0  -10  imp:p=1.0            $ Target region (mat 1, density 1.0 g/cm3)
+99 0        10  imp:p=0.0            $ Exterior void (graveyard)
 
 c ======================================================================
-c Block 2: Surface Cards (id [tr] mnemonic params)
-c - Blank line terminates Block 2
+c Block 2: Surface Cards (<id> <mnemonic> <params>)
 c ======================================================================
-10 so  5.0                                    $ Inner sphere R=5 cm
-20 so  25.0                                   $ Shield outer sphere R=25 cm
-90 so  100.0                                  $ Problem boundary R=100 cm
+10 so 10.0                           $ Sphere centered at origin, R=10 cm
 
 c ======================================================================
-c Block 3: Data Cards
+c Block 3: Data Cards (mode, sdef, m<n>, f<n>, nps)
 c ======================================================================
-mode n p
-c --- Source Definition (14.1 MeV isotropic point neutron source) ---
-sdef pos=0.0 0.0 0.0 erg=d1 par=n cel=1
-si1  l 14.1
-sp1  d 1.0
-c --- Materials (negative = weight fraction, positive = atomic fraction) ---
-m1   26056.80c 1.0                            $ Iron-56
-m2   7014.80c -0.78 8016.80c -0.22            $ Dry air
-c --- Tallies ---
-fc4  Neutron track-length flux in shield and air
-f4:n 2 3
-e4   1.0-3 0.1 1.0 10.0 15.0
-fc5  Point detector at r=50 cm along Z axis
-f5:n 0.0 0.0 50.0 1.0
-c --- Control ---
+mode p
+sdef par=p erg=1.0 pos=0.0 0.0 0.0
+m1   1001 -0.1119 8016 -0.8881       $ Material 1 (H2O)
+f4:p 1                               $ Flux tally in Cell 1 (or f6:p 1 for dose)
 nps  100000
 ",
     },
@@ -57,35 +39,26 @@ nps  100000
         name: "skeleton-kcode",
         summary: "Minimal complete 3-block MCNP input for Criticality (KCODE / KSRC)",
         content: "\
-Criticality Calculation Skeleton (KCODE)
+MCNP Criticality Working Skeleton (KCODE)
 c ======================================================================
-c Block 1: Cell Cards
+c Block 1: Cell Cards (<id> <mat> [<density>] <geom> <params>)
 c ======================================================================
-1  1 -18.74   -10      imp:n=1.0 tmp=2.53-8   $ Fissile core
-2  2 -1.0      10 -20  imp:n=1.0 tmp=2.53-8   $ Water reflector
-99 0           20      imp:n=0.0              $ Outside void
+1  1 -18.74  -10  imp:n=1.0          $ Fissile core region (mat 1, density 18.74 g/cm3)
+99 0          10  imp:n=0.0          $ Exterior void (graveyard)
 
 c ======================================================================
-c Block 2: Surface Cards
+c Block 2: Surface Cards (<id> <mnemonic> <params>)
 c ======================================================================
-10 so  8.74                                   $ Core radius [cm]
-20 so  28.74                                  $ Reflector outer radius [cm]
+10 so 8.74                           $ Core sphere centered at origin, R=8.74 cm
 
 c ======================================================================
-c Block 3: Data Cards
+c Block 3: Data Cards (mode, kcode, ksrc, m<n>, f<n>)
 c ======================================================================
 mode n
-c kcode <nsrck> <rkk> <ikz> <kct>
-kcode 1000 1.0 20 120
-ksrc  0.0 0.0 0.0
-c --- Materials ---
-m1   92235.80c -0.935 92238.80c -0.065        $ HEU metal
-m2   1001.80c 2.0 8016.80c 1.0                $ Light water (atomic ratio 2:1)
-mt2  lwtr.20t                                 $ Thermal scattering S(a,b) for M2
-c --- Tallies ---
-fc4  Core and reflector neutron flux
-f4:n 1 2
-e4   1.0-9 1.0-6 0.1 1.0 20.0
+kcode 1000 1.0 20 120                $ <nsrck> <rkk> <ikz> <kct>
+ksrc  0.0 0.0 0.0                    $ Initial fission source point(s)
+m1    92235 -0.935 92238 -0.065      $ Material 1 (HEU)
+f4:n  1                              $ Neutron flux tally in Cell 1
 ",
     },
     TemplateTopic {
@@ -315,7 +288,7 @@ pub fn get_template(topic: &str) -> Option<&'static TemplateTopic> {
     }
     // Common aliases
     let canonical = match q.as_str() {
-        "sdef" | "fixed-source" | "shielding" => "skeleton-sdef",
+        "sdef" | "fixed-source" | "shielding" | "skeleton" => "skeleton-sdef",
         "kcode" | "criticality" | "crit" => "skeleton-kcode",
         "surface" | "surf" => "surfaces",
         "macrobody" | "macro" | "facet" | "facets" => "macrobodies",

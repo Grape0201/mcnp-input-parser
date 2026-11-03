@@ -770,35 +770,35 @@ mode n
         let tpl = get_template("skeleton-sdef").expect("skeleton-sdef should exist");
         let uri = Url::parse("file:///test/skeleton.i").unwrap();
 
-        // Line 7 (0-based): `2  1 -7.87     10 -20  imp:n,p=1.0            $ Iron shield shell`
-        // Column 3 is `1` (Material M1), Column 15 is `10` (Surface 10)
-        let mat_def = compute_definitions(&uri, tpl.content, Position::new(7, 3))
+        // Line 4 (0-based): `1  1 -1.0  -10  imp:p=1.0            $ Target region (mat 1, density 1.0 g/cm3)`
+        // Column 3 is `1` (Material M1), Column 12 is `10` (Surface 10)
+        let mat_def = compute_definitions(&uri, tpl.content, Position::new(4, 3))
             .expect("Material 1 definition should resolve");
         match mat_def {
             GotoDefinitionResponse::Scalar(loc) => {
-                // `m1   26056.80c 1.0` is on 1-based line 29 -> 0-based line 28
-                assert_eq!(loc.range.start.line, 28);
+                // `m1   1001 -0.1119 8016 -0.8881` is on 1-based line 18 -> 0-based line 17
+                assert_eq!(loc.range.start.line, 17);
             }
             other => panic!("Expected scalar location, got {:?}", other),
         }
 
-        let surf_def = compute_definitions(&uri, tpl.content, Position::new(7, 15))
+        let surf_def = compute_definitions(&uri, tpl.content, Position::new(4, 12))
             .expect("Surface 10 definition should resolve");
         match surf_def {
             GotoDefinitionResponse::Scalar(loc) => {
-                // `10 so  5.0` is on 1-based line 16 -> 0-based line 15
-                assert_eq!(loc.range.start.line, 15);
+                // `10 so 10.0` is on 1-based line 11 -> 0-based line 10
+                assert_eq!(loc.range.start.line, 10);
             }
             other => panic!("Expected scalar location, got {:?}", other),
         }
 
         // References for Surface 10 (including declaration = 1 def + 2 cell refs = 3 locations)
-        let refs = compute_references(&uri, tpl.content, Position::new(7, 15), true)
+        let refs = compute_references(&uri, tpl.content, Position::new(4, 12), true)
             .expect("Surface 10 references should resolve");
         assert_eq!(refs.len(), 3);
 
-        // Hover on `so` mnemonic at Line 15 (0-based), Col 3
-        let hover = compute_hover(tpl.content, Position::new(15, 3))
+        // Hover on `so` mnemonic at Line 10 (0-based), Col 3
+        let hover = compute_hover(tpl.content, Position::new(10, 3))
             .expect("Hover on `so` mnemonic should resolve");
         match hover.contents {
             HoverContents::Markup(m) => {
@@ -812,13 +812,13 @@ mode n
     fn test_lsp_document_symbols_and_completions() {
         let tpl = get_template("skeleton-sdef").expect("skeleton-sdef should exist");
         let doc_symbols = compute_document_symbols(tpl.content);
-        assert_eq!(doc_symbols.len(), 5); // Cells, Surfaces, Materials, Tallies, Distributions
+        assert_eq!(doc_symbols.len(), 4); // Cells, Surfaces, Materials, Tallies
 
-        let cell_completions = compute_completions(tpl.content, Position::new(7, 0));
-        assert!(cell_completions.iter().any(|c| c.label.contains("cell 4")));
+        let cell_completions = compute_completions(tpl.content, Position::new(4, 0));
+        assert!(cell_completions.iter().any(|c| c.label.contains("cell 2")));
 
-        let data_completions = compute_completions(tpl.content, Position::new(28, 0));
-        assert!(data_completions.iter().any(|c| c.label == "m3"));
+        let data_completions = compute_completions(tpl.content, Position::new(17, 0));
+        assert!(data_completions.iter().any(|c| c.label == "m2"));
         assert!(data_completions.iter().any(|c| c.label == "f14:n"));
     }
 

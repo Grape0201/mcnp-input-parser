@@ -2653,14 +2653,14 @@ mod tests {
     fn test_symbols_and_next_available_ids() {
         let tpl = get_template("skeleton-sdef").expect("skeleton-sdef should exist");
         let symbols = analyze_symbols(tpl.content);
-        assert_eq!(symbols.cells.len(), 4);
-        assert_eq!(symbols.surfaces.len(), 3);
-        assert_eq!(symbols.materials.len(), 2);
-        assert_eq!(symbols.tallies.len(), 2);
-        assert_eq!(symbols.distributions.len(), 1);
-        assert_eq!(symbols.next_available_ids.cell, 4);
-        assert_eq!(symbols.next_available_ids.surface, 91);
-        assert_eq!(symbols.next_available_ids.material, 3);
+        assert_eq!(symbols.cells.len(), 2);
+        assert_eq!(symbols.surfaces.len(), 1);
+        assert_eq!(symbols.materials.len(), 1);
+        assert_eq!(symbols.tallies.len(), 1);
+        assert_eq!(symbols.distributions.len(), 0);
+        assert_eq!(symbols.next_available_ids.cell, 2);
+        assert_eq!(symbols.next_available_ids.surface, 11);
+        assert_eq!(symbols.next_available_ids.material, 2);
         assert_eq!(symbols.next_available_ids.tally_f4, 14);
     }
 
@@ -2671,17 +2671,17 @@ mod tests {
         let surf_rep = inspect_target(tpl.content, "s10").expect("valid target s10");
         assert!(surf_rep.found);
         assert_eq!(surf_rep.definitions.len(), 1);
-        assert_eq!(surf_rep.references.len(), 2); // Cell 1 (-10) and Cell 2 (10 -20)
+        assert_eq!(surf_rep.references.len(), 2); // Cell 1 (-10) and Cell 99 (10)
 
         let mat_rep = inspect_target(tpl.content, "m1").expect("valid target m1");
         assert!(mat_rep.found);
         assert_eq!(mat_rep.definitions.len(), 1);
-        assert_eq!(mat_rep.references.len(), 1); // Cell 2
+        assert_eq!(mat_rep.references.len(), 1); // Cell 1
 
         let tally_rep = inspect_target(tpl.content, "f4").expect("valid target f4");
         assert!(tally_rep.found);
         assert_eq!(tally_rep.definitions.len(), 1);
-        assert_eq!(tally_rep.references.len(), 2); // FC4 and E4
+        assert_eq!(tally_rep.references.len(), 0);
     }
 
     #[test]
