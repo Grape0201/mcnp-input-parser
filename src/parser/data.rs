@@ -308,8 +308,8 @@ pub fn parse_data_card(input: &str) -> IResult<&str, DataCard> {
         ("t", Some(id)) if header.modifier.is_none() => parse_tally_time_body(id, rem),
         ("c", Some(id)) if header.modifier.is_none() => parse_tally_cosine_body(id, rem),
         ("fc", Some(id)) if header.modifier.is_none() => parse_fc_body(id, rem),
-        ("fmesh", Some(id)) if header.modifier.is_none() => {
-            parse_fmesh_body(id, header.particles, rem)
+        ("fmesh", Some(id)) if matches!(header.modifier, None | Some('*')) => {
+            parse_fmesh_body(id, header.particles, header.modifier == Some('*'), rem)
         }
 
         // --- Variance Reduction (IMP, WWE, WWN, WWP, WWG, WWGE, MESH) ---

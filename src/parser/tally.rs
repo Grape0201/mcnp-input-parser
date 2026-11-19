@@ -546,11 +546,17 @@ pub fn parse_fc_body(id: u32, input: &str) -> IResult<&str, DataCard> {
 
 const KNOWN_FMESH_KEYS: &[&str] = &[
     "geom", "origin", "axs", "vec", "imesh", "iints", "jmesh", "jints", "kmesh", "kints", "emesh",
-    "eints", "tmesh", "tints", "factor", "out", "tr", "inc", "kclear",
+    "eints", "enorm", "tmesh", "tints", "tnorm", "factor", "out", "tr", "inc", "type", "kclear",
+    "tally",
 ];
 
-/// Parses `FMESH<n>:<p>` Superimposed Mesh Tally card body.
-pub fn parse_fmesh_body(id: u32, particles: Vec<Particle>, mut input: &str) -> IResult<&str, DataCard> {
+/// Parses `[* ]FMESH<n>:<p>` Superimposed Mesh Tally card body.
+pub fn parse_fmesh_body(
+    id: u32,
+    particles: Vec<Particle>,
+    is_energy_modified: bool,
+    mut input: &str,
+) -> IResult<&str, DataCard> {
     let mut raw_tokens = Vec::new();
     loop {
         let (r, _) = sep0(input)?;
@@ -572,21 +578,25 @@ pub fn parse_fmesh_body(id: u32, particles: Vec<Particle>, mut input: &str) -> I
             input = next_r;
         }
     }
+    ensure_non_empty(raw_tokens.is_empty(), input)?;
 
     let mut kv_groups: Vec<(String, Vec<String>)> = Vec::new();
+    let mut leading_unknown: Vec<String> = Vec::new();
     for tok in raw_tokens {
         let lower = tok.to_lowercase();
         if KNOWN_FMESH_KEYS.contains(&lower.as_str()) {
             kv_groups.push((lower, Vec::new()));
         } else if let Some((_, ref mut vals)) = kv_groups.last_mut() {
             vals.push(tok);
+        } else {
+            leading_unknown.push(tok);
         }
     }
-    ensure_non_empty(kv_groups.is_empty(), input)?;
 
     let mut card = FmeshCard {
         id,
         particles,
+        is_energy_modified,
         geom: None,
         origin: None,
         axs: None,
@@ -599,52 +609,183 @@ pub fn parse_fmesh_body(id: u32, particles: Vec<Particle>, mut input: &str) -> I
         kints: Vec::new(),
         emesh: Vec::new(),
         eints: Vec::new(),
+        enorm: None,
         tmesh: Vec::new(),
         tints: Vec::new(),
+        tnorm: None,
         factor: None,
         out: None,
+        tr: None,
+        inc: Vec::new(),
+        tally_type: None,
+        kclear: None,
+        tally: None,
         extra_options: Vec::new(),
     };
 
-    let to_floats = |vals: &[String]| -> Vec<f64> {
+    if !leading_unknown.is_empty() {
+        card.extra_options
+            .push(("_unknown".to_string(), leading_unknown));
+    }
+
+    fn parse_floats_strict(
+        key: &str,
+        vals: &[String],
+        extra_options: &mut Vec<(String, Vec<String>)>,
+    ) -> Vec<f64> {
         let joined = vals.join(" ");
-        parse_expanded_floats(&joined)
-            .map(|(_, v)| v)
-            .unwrap_or_default()
-    };
-    let to_u32s = |vals: &[String]| -> Vec<u32> {
-        to_floats(vals)
-            .into_iter()
-            .map(|v| v.round() as u32)
-            .collect()
-    };
-    let to_vec3 = |vals: &[String]| -> Option<[f64; 3]> {
-        let f = to_floats(vals);
-        if f.len() == 3 {
-            Some([f[0], f[1], f[2]])
+        match parse_expanded_floats(&joined) {
+            Ok((rem, v)) => {
+                let trimmed = rem.trim();
+                if !trimmed.is_empty() {
+                    extra_options.push((
+                        format!("_invalid:{}", key),
+                        trimmed.split_whitespace().map(|s| s.to_string()).collect(),
+                    ));
+                }
+                v
+            }
+            Err(_) => {
+                extra_options.push((format!("_invalid:{}", key), vals.to_vec()));
+                Vec::new()
+            }
+        }
+    }
+
+    fn parse_u32s_strict(
+        key: &str,
+        vals: &[String],
+        extra_options: &mut Vec<(String, Vec<String>)>,
+    ) -> Vec<u32> {
+        let floats = parse_floats_strict(key, vals, extra_options);
+        let mut out = Vec::with_capacity(floats.len());
+        for v in floats {
+            if v < 0.0 || (v - v.round()).abs() > 1e-6 {
+                extra_options.push((format!("_non_integer:{}", key), vec![v.to_string()]));
+            } else {
+                out.push(v.round() as u32);
+            }
+        }
+        out
+    }
+
+    fn parse_vec3_strict(
+        key: &str,
+        vals: &[String],
+        extra_options: &mut Vec<(String, Vec<String>)>,
+    ) -> Option<[f64; 3]> {
+        let before = extra_options.len();
+        let f = parse_floats_strict(key, vals, extra_options);
+        if extra_options.len() == before {
+            if f.len() == 3 {
+                Some([f[0], f[1], f[2]])
+            } else {
+                extra_options.push((format!("_vec3_len:{}", key), vals.to_vec()));
+                None
+            }
         } else {
             None
         }
-    };
+    }
 
     for (key, vals) in kv_groups {
+        if vals.is_empty() {
+            card.extra_options
+                .push((format!("_empty:{}", key), Vec::new()));
+            continue;
+        }
         match key.as_str() {
-            "geom" => card.geom = vals.first().map(|s| s.to_lowercase()),
-            "origin" => card.origin = to_vec3(&vals),
-            "axs" => card.axs = to_vec3(&vals),
-            "vec" => card.vec = to_vec3(&vals),
-            "imesh" => card.imesh = to_floats(&vals),
-            "iints" => card.iints = to_u32s(&vals),
-            "jmesh" => card.jmesh = to_floats(&vals),
-            "jints" => card.jints = to_u32s(&vals),
-            "kmesh" => card.kmesh = to_floats(&vals),
-            "kints" => card.kints = to_u32s(&vals),
-            "emesh" => card.emesh = to_floats(&vals),
-            "eints" => card.eints = to_u32s(&vals),
-            "tmesh" => card.tmesh = to_floats(&vals),
-            "tints" => card.tints = to_u32s(&vals),
-            "factor" => card.factor = to_floats(&vals).first().copied(),
-            "out" => card.out = vals.first().map(|s| s.to_lowercase()),
+            "geom" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                card.geom = Some(vals[0].to_lowercase());
+            }
+            "origin" => card.origin = parse_vec3_strict(&key, &vals, &mut card.extra_options),
+            "axs" => card.axs = parse_vec3_strict(&key, &vals, &mut card.extra_options),
+            "vec" => card.vec = parse_vec3_strict(&key, &vals, &mut card.extra_options),
+            "imesh" => card.imesh = parse_floats_strict(&key, &vals, &mut card.extra_options),
+            "iints" => card.iints = parse_u32s_strict(&key, &vals, &mut card.extra_options),
+            "jmesh" => card.jmesh = parse_floats_strict(&key, &vals, &mut card.extra_options),
+            "jints" => card.jints = parse_u32s_strict(&key, &vals, &mut card.extra_options),
+            "kmesh" => card.kmesh = parse_floats_strict(&key, &vals, &mut card.extra_options),
+            "kints" => card.kints = parse_u32s_strict(&key, &vals, &mut card.extra_options),
+            "emesh" => card.emesh = parse_floats_strict(&key, &vals, &mut card.extra_options),
+            "eints" => card.eints = parse_u32s_strict(&key, &vals, &mut card.extra_options),
+            "enorm" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                card.enorm = Some(vals[0].to_lowercase());
+            }
+            "tmesh" => card.tmesh = parse_floats_strict(&key, &vals, &mut card.extra_options),
+            "tints" => card.tints = parse_u32s_strict(&key, &vals, &mut card.extra_options),
+            "tnorm" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                card.tnorm = Some(vals[0].to_lowercase());
+            }
+            "factor" => {
+                let before = card.extra_options.len();
+                let f = parse_floats_strict(&key, &vals, &mut card.extra_options);
+                if card.extra_options.len() == before && f.len() != 1 {
+                    card.extra_options
+                        .push((format!("_single_len:{}", key), vals));
+                }
+                card.factor = f.first().copied();
+            }
+            "out" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                card.out = Some(vals[0].to_lowercase());
+            }
+            "tr" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                match vals[0].parse::<u32>() {
+                    Ok(v) => card.tr = Some(v),
+                    Err(_) => card
+                        .extra_options
+                        .push((format!("_invalid:{}", key), vec![vals[0].clone()])),
+                }
+            }
+            "inc" => {
+                card.inc = vals.iter().map(|s| s.to_lowercase()).collect();
+            }
+            "type" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                card.tally_type = Some(vals[0].to_lowercase());
+            }
+            "kclear" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                match vals[0].parse::<u32>() {
+                    Ok(v) => card.kclear = Some(v),
+                    Err(_) => card
+                        .extra_options
+                        .push((format!("_invalid:{}", key), vec![vals[0].clone()])),
+                }
+            }
+            "tally" => {
+                if vals.len() > 1 {
+                    card.extra_options
+                        .push((format!("_extra:{}", key), vals[1..].to_vec()));
+                }
+                card.tally = Some(vals[0].to_lowercase());
+            }
             _ => card.extra_options.push((key, vals)),
         }
     }

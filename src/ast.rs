@@ -539,11 +539,13 @@ pub struct FmCard {
     pub bins: Vec<FmBin>,
 }
 
-/// Superimposed mesh tally card (`FMESH<n>:<p>`).
+/// Superimposed mesh tally card (`[* ]FMESH<n>:<p>`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FmeshCard {
     pub id: u32,
     pub particles: Vec<Particle>,
+    /// True if the card mnemonic is prefixed with `*` (`*FMESHn:p`, energy times particle weight).
+    pub is_energy_modified: bool,
     pub geom: Option<String>,
     pub origin: Option<[f64; 3]>,
     pub axs: Option<[f64; 3]>,
@@ -556,10 +558,17 @@ pub struct FmeshCard {
     pub kints: Vec<u32>,
     pub emesh: Vec<f64>,
     pub eints: Vec<u32>,
+    pub enorm: Option<String>,
     pub tmesh: Vec<f64>,
     pub tints: Vec<u32>,
+    pub tnorm: Option<String>,
     pub factor: Option<f64>,
     pub out: Option<String>,
+    pub tr: Option<u32>,
+    pub inc: Vec<String>,
+    pub tally_type: Option<String>,
+    pub kclear: Option<u32>,
+    pub tally: Option<String>,
     pub extra_options: Vec<(String, Vec<String>)>,
 }
 

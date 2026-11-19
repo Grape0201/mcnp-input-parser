@@ -1,6 +1,6 @@
 # MCNP 入力ファイル 検出エラー・警告一覧 (`mcnp-input-parser`)
 
-本ドキュメントは、[`mcnp-input-parser`](../src/lib.rs) の構文解析（[`parse_mcnp_input`](../src/lib.rs) / [`parse_mcnp_input_lossy`](../src/lib.rs)）およびセマンティック検証（[`validate_mcnp_input`](../src/validate.rs)）によって検出されるエラーおよび警告の一覧をまとめたリファレンスです。
+本ドキュメントは、[`mcnp-input-parser`](../src/lib.rs) の構文解析（[`parse_mcnp_input`](../src/lib.rs) / [`parse_mcnp_input_lossy`](../src/lib.rs)）およびセマンティック検証（[`validate_mcnp_input`](../src/validate/mod.rs)）によって検出されるエラーおよび警告の一覧をまとめたリファレンスです。
 
 ---
 
@@ -48,7 +48,7 @@ cargo run -- --validate path/to/input.i
 
 ## 3. セマンティック検証エラー・警告一覧 (`ValidationError` / `ErrorCode`)
 
-[`validate_mcnp_input(&input, &spans)`](../src/validate.rs) が返す診断結果（[`ValidationError`](../src/validate.rs)）の一覧です。
+[`validate_mcnp_input(&input, &spans)`](../src/validate/mod.rs) が返す診断結果（[`ValidationError`](../src/validate/types.rs)）の一覧です。
 
 ### 3.1 ブロック構造 (`ValidationCategory::Structure`)
 
@@ -69,7 +69,7 @@ cargo run -- --validate path/to/input.i
 | **`E103`** | `DataCardIdOutOfRange` | `Error` | データカードの番号が MCNP の上限を超過 | `TRn` / `SIn` / `SPn` / `SBn` / `DSn` が `1..=999` の範囲外、または `Mm` / `Fn` が `99,999,999` 超過 |
 | **`E104`** | `DuplicateCellId` | `Error` | 同一の Cell ID が複数回定義されている | 最初に定義された行番号と重複行番号の両方を報告 |
 | **`E105`** | `DuplicateSurfaceId` | `Error` | 同一の Surface ID が複数回定義されている | 最初に定義された行番号と重複行番号の両方を報告 |
-| **`E106`** | `DuplicateDataCard` | `Error` | 同一番号のデータカード、または単一であるべきカードが複数回定義されている | `M1`, `MT1`, `TR1`, `F4`, `FMESH4`, `SI1`, `SP1`, `SB1`, `DS1`, `SC1`, `DE4`, `DF4`, `FM4`, `FS4`, `SD4`, `E4`, `T4`, `C4`, `FC4` の重複、または複数の `MODE`, `SDEF`, `KCODE`, `KSRC`, `NPS` |
+| **`E106`** | `DuplicateDataCard` | `Error` | 同一番号のデータカード、または単一であるべきカードが複数回定義されている | `M1`, `MT1`, `TR1`, `F4`, `FMESH4`（および `F4` と `FMESH4` の同一番号衝突）, `SI1`, `SP1`, `SB1`, `DS1`, `SC1`, `DE4`, `DF4`, `FM4`, `FS4`, `SD4`, `E4`, `T4`, `C4`, `FC4` の重複、または複数の `MODE`, `SDEF`, `KCODE`, `KSRC`, `NPS` |
 
 ---
 
@@ -93,7 +93,7 @@ cargo run -- --validate path/to/input.i
 | **`E303`** | `UndefinedCell` | `Error` | 定義されていない Cell ID を参照している | ・セル補集合 `#n`<br>・`LIKE n BUT` の基底セル `n`<br>・セルタリー（`F4`, `F6`, `F7`, `F8`）、線源（`SDEF CEL=n`）、Weight Window Generator（`WWG`） |
 | **`E304`** | `CircularCellReference` | `Error` | セル参照が自己参照または循環参照している | ・`#1 -> #2 -> #1` のような補集合のサイクル<br>・`LIKE n BUT` の自己参照、または `LIKE` セルをさらに `LIKE` している多段参照 |
 | **`E305`** | `UndefinedMaterial` | `Error` | 定義されていない材料番号 `Mm` を参照している | ・セルの `material_id > 0` または `MAT=m`<br>・熱散乱カード `MTm`<br>・タリー乗数カード `FMn` 内の材料番号 |
-| **`E306`** | `UndefinedTransform` | `Error` | 定義されていない座標変換カード `TRn` を参照している | ・サーフェスの `transform_id > 0`<br>・セルの `TRCL=n`（変換ID指定時）<br>・線源の `SDEF TR=n` |
+| **`E306`** | `UndefinedTransform` | `Error` | 定義されていない座標変換カード `TRn` を参照している | ・サーフェスの `transform_id > 0`<br>・セルの `TRCL=n`（変換ID指定時）<br>・線源の `SDEF TR=n`<br>・メッシュタリーの `FMESHn TR=n` |
 | **`E307`** | `UndefinedUniverse` | `Error` | `FILL` で指定された Universe ID `u` に属するセル（`U=u`）が存在しない | `1 0 -1 fill=10` だが `u=10` のセルが未定義 |
 | **`E308`** | `CircularUniverseFill` | `Error` | Universe と `FILL` の階層構造が循環している | `U=1` のセルが `FILL=2` を持ち、`U=2` のセルが `FILL=1` を持つ |
 | **`W309`** | `UnusedSurface` | `Warning` | 定義されているがどこからも参照されていないサーフェス | セル、タリー、`SDEF`、周期境界のいずれからも未使用 |
@@ -143,7 +143,7 @@ cargo run -- --validate path/to/input.i
 | **`E604`** | `NonMonotonicTallyBins` | `Error` | `En`, `Tn`, `Cn`, `DEn` のビン境界が狭義単調増加していない | `e4 10.0 1.0 20.0` |
 | **`E605`** | `InvalidCosineBinRange` | `Error` | 角度ビン `Cn` の余弦値が $[-1.0, 1.0]$ の範囲外 | `c1 -1.5 0.0 1.0` |
 | **`E606`** | `InvalidDetectorRadius` | `Error` | `F5` ポイント/リング検出器の排除球半径 $R_0 < 0$ | `f5:n 0 0 10 -0.5` |
-| **`E607`** | `InvalidFmeshConfiguration` | `Error` | `FMESH` の設定不備 | ・`IMESH`/`IINTS`（および `J`, `K`, `E`）の要素数が対応していない<br>・メッシュ座標が単調増加していない<br>・分割数（`IINTS`, `JINTS`, `KINTS`）に `0` が含まれる |
+| **`E607`** | `InvalidFmeshConfiguration` | `Error` | `FMESH` の設定不備 (§5.11.2) | ・タリー番号末尾が `4` でない (`id % 10 != 4`)、または粒子指定が単一でない<br>・`IMESH`/`JMESH`/`KMESH` の必須指定欠落（`out` のみのリスタート指定を除く）<br>・`IMESH`/`IINTS`（および `J`, `K`, `E`, `T`）の要素数が一致していない (`len != len`)、または分割数に `0` が含まれる<br>・メッシュ座標が単調増加していない、または直交座標で先頭座標が `ORIGIN` 以下 / 円筒座標で `0` 以下・`KMESH` 末尾が `1.0` でない / `EMESH` 先頭が `0` 以下<br>・`ORIGIN`, `AXS`, `VEC` が3要素でない、ゼロベクトル、または `AXS` と `VEC` が平行<br>・`GEOM`, `ENORM`, `TNORM`, `OUT`, `TYPE`, `TALLY`, `INC`, `FACTOR` の不正値、未知キーワード・数値変換失敗<br>・`OUT=xdmf` と `none`/`xdmf` 以外の出力形式の同一入力内混在、`SSR` 線源と `TALLY=batch`/`rma_batch` の併用、`FMESH` に対する `En`/`Tn` カードの誤用 |
 
 ---
 
