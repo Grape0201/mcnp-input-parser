@@ -39,6 +39,21 @@ fn take_balanced_parens(input: &str) -> IResult<&str, &str> {
     )))
 }
 
+/// Returns a `Verify` parser error when a required tally body is empty.
+fn ensure_non_empty<'a>(
+    is_empty: bool,
+    input: &'a str,
+) -> Result<(), nom::Err<nom::error::Error<&'a str>>> {
+    if is_empty {
+        Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Verify,
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 /// Parses standard tally card (`F1`, `F2`, `F4`, `F6`, `F7`, `F8`).
 pub fn parse_standard_tally_body(
     id: u32,
@@ -121,6 +136,7 @@ pub fn parse_standard_tally_body(
     flush_pending(&mut pending_shortcuts, &mut targets).map_err(|_| {
         nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Verify))
     })?;
+    ensure_non_empty(targets.is_empty(), input)?;
 
     Ok((
         input,
@@ -281,6 +297,7 @@ pub fn parse_dose_body(id: u32, is_function: bool, mut input: &str) -> IResult<&
             values.push(v);
         }
     }
+    ensure_non_empty(values.is_empty() && options.is_empty(), input)?;
 
     Ok((
         input,
@@ -369,6 +386,7 @@ pub fn parse_fm_body(id: u32, modifier: Option<char>, mut input: &str) -> IResul
             break;
         }
     }
+    ensure_non_empty(bins.is_empty(), input)?;
 
     Ok((
         input,
@@ -413,6 +431,7 @@ pub fn parse_fs_body(id: u32, mut input: &str) -> IResult<&str, DataCard> {
             surfaces.push(v.round() as i32);
         }
     }
+    ensure_non_empty(surfaces.is_empty(), input)?;
 
     Ok((
         input,
@@ -427,6 +446,7 @@ pub fn parse_fs_body(id: u32, mut input: &str) -> IResult<&str, DataCard> {
 /// Parses `SD<n>` Segment Divisor card body.
 pub fn parse_sd_body(id: u32, input: &str) -> IResult<&str, DataCard> {
     let (rem, values) = parse_expanded_entries(input)?;
+    ensure_non_empty(values.is_empty(), rem)?;
     Ok((rem, DataCard::SegmentDivisor { id, values }))
 }
 
@@ -454,6 +474,7 @@ fn parse_bins_and_flags(mut input: &str) -> IResult<&str, (Vec<Entry>, Vec<Strin
     let bins = expand_shortcut_items(&items).map_err(|_| {
         nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Verify))
     })?;
+    ensure_non_empty(bins.is_empty(), input)?;
 
     Ok((input, (bins, flags)))
 }
@@ -561,6 +582,7 @@ pub fn parse_fmesh_body(id: u32, particles: Vec<Particle>, mut input: &str) -> I
             vals.push(tok);
         }
     }
+    ensure_non_empty(kv_groups.is_empty(), input)?;
 
     let mut card = FmeshCard {
         id,
@@ -812,5 +834,19 @@ mod tests {
                 comment: "Dose rate behind concrete shield [rem/h]".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn test_empty_tally_cards_fail() {
+        for card in [
+            "f4", "f4:", "f4: 10", "f4:n", "f4:n t", "f1", "f5", "fx5:n", "fmesh4", "fmesh4:",
+            "fmesh4:p", "de4", "df4", "fm4", "fs4", "fs4 t", "sd4", "e4", "e4 nt", "t4", "c4",
+        ] {
+            assert!(
+                parse_data_card_complete(card).is_err(),
+                "Expected `{}` to fail when body is empty",
+                card
+            );
+        }
     }
 }

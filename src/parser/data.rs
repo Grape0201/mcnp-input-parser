@@ -37,7 +37,7 @@ fn parse_card_header(input: &str) -> IResult<&str, CardHeader> {
     let (rem, num_part) = opt(take_while1(|c: char| c.is_ascii_digit()))(rem)?;
     let (rem, particles) = opt(particle_designators)(rem)?;
 
-    if !is_token_boundary(rem) {
+    if rem.starts_with(':') || !is_token_boundary(rem) {
         return Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Tag,
