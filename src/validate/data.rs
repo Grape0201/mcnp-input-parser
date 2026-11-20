@@ -2,12 +2,12 @@ use super::context::{
     check_particle_in_mode, data_line, is_strictly_increasing, ValidationContext,
 };
 use super::fmesh::validate_fmesh;
+use super::sdef::validate_sdef;
 use super::types::{
     ErrorCode, Severity, ValidationCategory, ValidationError, KNOWN_MCNP_DATA_PREFIXES,
 };
 use crate::ast::{
-    DataCard, DetectorEntry, Entry, FmBin, Particle, SdefValue, SdefVariable, SiEntry,
-    SpSbContent, TallyKind, TallyTarget,
+    DataCard, DetectorEntry, Entry, FmBin, Particle, SiEntry, SpSbContent, TallyKind, TallyTarget,
 };
 
 pub(super) fn validate_data_cards(ctx: &mut ValidationContext<'_>) {
@@ -108,111 +108,7 @@ pub(super) fn validate_data_cards(ctx: &mut ValidationContext<'_>) {
                 }
             }
 
-            DataCard::Sdef { params } => {
-                for param in params {
-                    match &param.value {
-                        SdefValue::Distribution(d) => {
-                            if param.variable.is_vector() && *d > 0 {
-                                ctx.vector_dist_ids.insert(*d);
-                            }
-                            ctx.referenced_dists.push((
-                                *d,
-                                line,
-                                format!("SDEF {:?}", param.variable).to_uppercase(),
-                            ));
-                        }
-                        SdefValue::Function { dist_id, .. } => {
-                            if param.variable.is_vector() && *dist_id > 0 {
-                                ctx.vector_dist_ids.insert(*dist_id);
-                            }
-                            ctx.referenced_dists.push((
-                                *dist_id,
-                                line,
-                                format!("SDEF {:?}", param.variable).to_uppercase(),
-                            ));
-                        }
-                        SdefValue::Scalar(v) => match param.variable {
-                            SdefVariable::Cel => {
-                                let cid = v.round() as u32;
-                                if cid > 0 && !ctx.cell_map.contains_key(&cid) {
-                                    ctx.diagnostics.push(ValidationError {
-                                        code: ErrorCode::UndefinedCell,
-                                        severity: Severity::Error,
-                                        category: ValidationCategory::Reference,
-                                        line_number: line,
-                                        message: format!(
-                                            "SDEF CEL={} references undefined cell {}",
-                                            cid, cid
-                                        ),
-                                    });
-                                }
-                            }
-                            SdefVariable::Sur => {
-                                let sid = v.round() as u32;
-                                ctx.used_surfaces.insert(sid);
-                                if sid > 0 && !ctx.surface_map.contains_key(&sid) {
-                                    ctx.diagnostics.push(ValidationError {
-                                        code: ErrorCode::UndefinedSurface,
-                                        severity: Severity::Error,
-                                        category: ValidationCategory::Reference,
-                                        line_number: line,
-                                        message: format!(
-                                            "SDEF SUR={} references undefined surface {}",
-                                            sid, sid
-                                        ),
-                                    });
-                                }
-                            }
-                            SdefVariable::Tr => {
-                                let tid = v.round() as u32;
-                                if tid > 0 && !ctx.transforms.contains_key(&tid) {
-                                    ctx.diagnostics.push(ValidationError {
-                                        code: ErrorCode::UndefinedTransform,
-                                        severity: Severity::Error,
-                                        category: ValidationCategory::Reference,
-                                        line_number: line,
-                                        message: format!(
-                                            "SDEF TR={} references undefined transform TR{}",
-                                            tid, tid
-                                        ),
-                                    });
-                                }
-                            }
-                            _ => {}
-                        },
-                        SdefValue::Symbol(sym) => {
-                            if param.variable == SdefVariable::Cel {
-                                for part in sym.split(':') {
-                                    if let Ok(cid) = part.trim().parse::<u32>() {
-                                        if cid > 0 && !ctx.cell_map.contains_key(&cid) {
-                                            ctx.diagnostics.push(ValidationError {
-                                                code: ErrorCode::UndefinedCell,
-                                                severity: Severity::Error,
-                                                category: ValidationCategory::Reference,
-                                                line_number: line,
-                                                message: format!(
-                                                    "SDEF CEL={} references undefined cell {}",
-                                                    sym, cid
-                                                ),
-                                            });
-                                        }
-                                    }
-                                }
-                            } else if param.variable == SdefVariable::Par {
-                                let p = Particle::new(sym.trim());
-                                check_particle_in_mode(
-                                    &p,
-                                    &ctx.active_particles,
-                                    line,
-                                    "SDEF PAR",
-                                    &mut ctx.diagnostics,
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
+            DataCard::Sdef { params } => validate_sdef(params, line, ctx),
 
             DataCard::Si(si) => {
                 for e in &si.entries {

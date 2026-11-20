@@ -72,6 +72,7 @@ Block 1〜3 の論理カード文字列を `nom` コンビネータで AST へ�
 | [`src/validate/cell.rs`](../src/validate/cell.rs) | **Phase 4**: セルの材料／密度整合（Void・非 Void・`LIKE n BUT`）、ジオメトリ参照（サーフェス・ファセット・`#n` 補集合）、セルパラメータ値、循環参照（`#n` / `U`-`FILL`）の DFS 検査。 | `validate_cells`, `validate_geometry_expr`, `check_complement_cell_cycles`, `extract_fill_universes`, `check_universe_cycles` |
 | [`src/validate/data.rs`](../src/validate/data.rs) | **Phase 5**: 材料（ZAID・質量/原子分率符号混在）、熱中性子散乱 `MT`、`SDEF`、`SI`/`SP`/`SB`/`DS`、タリー群、`IMP`/`WW*`、`TR`/`NPS`/`KCODE`、`Generic` カードの単体検証。 | `validate_data_cards`, `is_valid_zaid` |
 | [`src/validate/fmesh.rs`](../src/validate/fmesh.rs) | `FMESH` メッシュタリーの専用検証（番号末尾 `4`、単一粒子、未認識キーワード、空間・エネルギー・時間メッシュの単調性・区間数、`OUT`/`TYPE`/`TALLY`/`TR` 等）。 | `validate_fmesh` |
+| [`src/validate/sdef.rs`](../src/validate/sdef.rs) | `SDEF` 一般線源定義の専用検証（キーワード重複・未知・範囲、`CCC` セル参照、特殊 `PAR` 判定、`FPOS`/1段階依存/`Dn` 重複禁止、`PAR=BG`+`LOC`、`TR=Dm`+`SIm L` 等）。 | `validate_sdef` |
 | [`src/validate/cross_ref.rs`](../src/validate/cross_ref.rs) | **Phase 6**: 複数カードに跨る整合検査（`SDEF`/`KCODE`/`SSR` の有無、3D ベクトル分布伝搬を含む `SI`/`SP`/`SB` ペアリングと長さ、`DE`/`DF` ペアリング、全セルの `IMP` カバレッジ、未使用 Surface/Material 警告）。 | `validate_cross_references` |
 
 ---

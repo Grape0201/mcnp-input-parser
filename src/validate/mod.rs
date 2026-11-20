@@ -3,6 +3,7 @@ mod context;
 mod cross_ref;
 mod data;
 mod fmesh;
+mod sdef;
 mod structure;
 mod surface;
 pub mod types;
@@ -456,5 +457,114 @@ e14 1.0 10.0
             .iter()
             .any(|d| d.code == ErrorCode::InvalidFmeshConfiguration
                 && d.message.contains("E14 cannot be used with mesh tally FMESH14")));
+    }
+
+    #[test]
+    fn test_sdef_comprehensive_validation() {
+        let valid_sdef = "\
+SDEF valid test
+1 1 -1.0 -1 imp:n=1
+2 0 1 imp:n=0
+
+1 so 10.0
+
+mode n
+m1 92235.80c 1.0
+sdef pos=0 0 0 erg=14.1 dir=0.5 rad=2.0 wgt=1.0 eff=0.01 nrm=-1 cel=1 par=n
+nps 100
+";
+        let res = parse_mcnp_input_lossy(valid_sdef);
+        assert!(res.errors.is_empty(), "parse errors: {:?}", res.errors);
+        let diags = validate_mcnp_input(&res.input, &res.spans);
+        assert!(diags.is_empty(), "expected no diagnostics, got: {:?}", diags);
+
+        let valid_special_par = "\
+SDEF cosmic/background test
+1 1 -1.0 -1 imp:n=1
+2 0 1 imp:n=0
+
+1 so 10.0
+
+mode n
+m1 92235.80c 1.0
+sdef pos=0 0 0 rad=100.0 par=BG loc=35.0 139.0 0.1 dat=6 15 2020
+nps 100
+";
+        let res_sp = parse_mcnp_input_lossy(valid_special_par);
+        assert!(res_sp.errors.is_empty(), "parse errors: {:?}", res_sp.errors);
+        let diags_sp = validate_mcnp_input(&res_sp.input, &res_sp.spans);
+        assert!(
+            diags_sp.is_empty(),
+            "expected no diagnostics for special PAR=BG, got: {:?}",
+            diags_sp
+        );
+
+        let invalid_sdef = "\
+SDEF invalid test
+1 1 -1.0 -1 imp:n=1
+2 0 1 imp:n=0
+
+1 so 10.0
+
+mode n
+m1 92235.80c 1.0
+sdef erg=-1.0 erg=2.0 dir=1.5 rad=-0.5 wgt=d1 eff=1.2 nrm=2 ccc=999 cel=fpos d2 erg=frad d3 rad=fcel d4 tr=d5
+si1 1.0 2.0
+sp1 0.5 0.5
+si2 1
+sp2 1.0
+si3 1.0 2.0
+sp3 0.5 0.5
+si4 1.0 2.0
+sp4 0.5 0.5
+si5 h 1 2
+sp5 0.0 1.0
+nps 100
+";
+        let res_inv = parse_mcnp_input_lossy(invalid_sdef);
+        let diags_inv = validate_mcnp_input(&res_inv.input, &res_inv.spans);
+        let has_code_msg = |code: ErrorCode, substr: &str| {
+            diags_inv
+                .iter()
+                .any(|d| d.code == code && d.message.contains(substr))
+        };
+
+        assert!(has_code_msg(ErrorCode::InvalidSdefParameter, "Duplicate SDEF keyword `ERG`"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefParameter, "SDEF ERG=-1 cannot be negative"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefParameter, "SDEF DIR=1.5 must be in range [-1, 1]"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefParameter, "SDEF RAD=-0.5 cannot be negative"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefParameter, "SDEF WGT must be an explicit scalar value"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefParameter, "SDEF EFF=1.2 must be in range (0, 1]"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefParameter, "SDEF NRM=2 must be +1 or -1"));
+        assert!(has_code_msg(ErrorCode::UndefinedCell, "SDEF CCC=999 references undefined cell 999"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefDependency, "cannot depend on POS (FPOS)"));
+        assert!(has_code_msg(ErrorCode::InvalidSdefDependency, "only one level of dependence is allowed"));
+        assert!(has_code_msg(ErrorCode::InconsistentSdefOptions, "requires SI5 to use option L"));
+
+        // Duplicate Dn usage and PAR=BG without LOC
+        let invalid_sdef2 = "\
+SDEF invalid test 2
+1 1 -1.0 -1 imp:n=1
+2 0 1 imp:n=0
+
+1 so 10.0
+
+mode n
+m1 92235.80c 1.0
+sdef erg=d1 rad=d1 par=BG
+si1 1.0 2.0
+sp1 0.5 0.5
+nps 100
+";
+        let res_inv2 = parse_mcnp_input_lossy(invalid_sdef2);
+        let diags_inv2 = validate_mcnp_input(&res_inv2.input, &res_inv2.spans);
+        assert!(diags_inv2.iter().any(|d| {
+            d.code == ErrorCode::InvalidSdefDependency
+                && d.message.contains("Distribution D1 is used by multiple SDEF variables")
+        }));
+        assert!(diags_inv2.iter().any(|d| {
+            d.code == ErrorCode::InconsistentSdefOptions
+                && d.message.contains("SDEF PAR=BG/BN/BP requires the LOC keyword")
+        }));
     }
 }

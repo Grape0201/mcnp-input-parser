@@ -195,6 +195,15 @@ pub fn hint_for_validation_error(err: &ValidationError, input: &McnpInput) -> St
         ErrorCode::InvalidSourceProbability => {
             "Probabilities on `SP`/`SB` must be non-negative with a positive sum, and built-in analytic function parameters must be positive.".to_string()
         }
+        ErrorCode::InvalidSdefParameter => {
+            "Check `SDEF` keyword spelling, avoid duplicate keywords, and ensure values are within valid MCNP ranges (e.g. `ERG >= 0`, `-1 <= DIR <= 1`, `RAD >= 0`, `0 < EFF <= 1`, `WGT > 0`, `NRM = ±1`, explicit scalars for `WGT`/`EFF`/`NRM`).".to_string()
+        }
+        ErrorCode::InvalidSdefDependency => {
+            "Each `Dn` distribution may be used by only one `SDEF` variable; dependent functions (`F<var> Dn`) allow only one level of dependence, cannot self-depend, and position variables cannot depend on `POS`.".to_string()
+        }
+        ErrorCode::InconsistentSdefOptions => {
+            "Check `SDEF` option combinations: `PAR=BG/BN/BP` requires `LOC`, `DAT`/`LOC` are only for cosmic/background sources, and `TR=Dm` requires `SIm L`.".to_string()
+        }
         ErrorCode::OrphanTallyModifierCard => {
             "Ensure the modifier card ID (`En`, `Tn`, `Cn`, `FMn`, `FSn`, `SDn`, `DEn`, `DFn`, `FCn`) matches a defined `F<n>` tally ID in Block 3.".to_string()
         }

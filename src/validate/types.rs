@@ -93,6 +93,9 @@ pub enum ErrorCode {
     SourceDistributionLengthMismatch,
     NonMonotonicSourceBins,
     InvalidSourceProbability,
+    InvalidSdefParameter,
+    InvalidSdefDependency,
+    InconsistentSdefOptions,
 
     // Tally & Mesh (E6xx)
     OrphanTallyModifierCard,
@@ -170,6 +173,9 @@ impl ErrorCode {
             Self::SourceDistributionLengthMismatch => "E506",
             Self::NonMonotonicSourceBins => "E507",
             Self::InvalidSourceProbability => "E508",
+            Self::InvalidSdefParameter => "E509",
+            Self::InvalidSdefDependency => "E510",
+            Self::InconsistentSdefOptions => "W511",
 
             Self::OrphanTallyModifierCard => "E601",
             Self::TallyTargetKindMismatch => "E602",

@@ -130,6 +130,9 @@ cargo run -- --validate path/to/input.i
 | **`E506`** | `SourceDistributionLengthMismatch` | `Error` | `SIn` と `SPn` / `SBn` の要素数が一致しない（3次元ベクトル分布では `3:1` でない）、またはヒストグラム先頭確率が `0.0` でない | ・`SI1 H` が 4 要素なのに `SP1` が 3 要素<br>・`POS`/`AXS`/`VEC`/`LOC` 用の `SI2` の要素数が `SP2` の3倍でない<br>・`SI1 H` に対する `SP1 D` の第1要素が `0.0` でない |
 | **`E507`** | `NonMonotonicSourceBins` | `Error` | 1次元スカラー分布の `SIn`（`H` または `A` オプション）のビン境界が狭義単調増加していない | `si1 h 0.0 5.0 2.0 10.0`（3次元ベクトル座標リストは対象外） |
 | **`E508`** | `InvalidSourceProbability` | `Error` | `SPn` / `SBn` の確率値に負数が含まれる、または正の確率が1つもない | `sp1 d 0.0 -0.5 0.5` または全要素 `0.0` |
+| **`E509`** | `InvalidSdefParameter` | `Error` / `Warning` | `SDEF` キーワードの重複・未知キーワード、明示スカラー制約違反、または数値範囲・引数数違反 (§5.8.1) | ・同一 `SDEF` カード内の重複キーワード（`erg=1 erg=2`）<br>・`WGT`/`EFF`/`NRM` への分布 `Dn` や関数 `Fvar Dn` の指定<br>・`ERG < 0`, `DIR` が `[-1, 1]` 外, `RAD < 0`, `ARA <= 0`, `WGT <= 0`, `EFF` が `(0, 1]` 外, `NRM` が `±1` 以外<br>・`DAT`（月 `1..=12`, 日 `1..=31`, 4桁年）や `LOC`（緯度 `[-90, 90]`, 経度 `[-180, 180]`）の引数数・範囲外<br>・`CEL`/`SUR`/`TR` が負、または `CCC <= 0`（未定義 `CCC` は `E303`） |
+| **`E510`** | `InvalidSdefDependency` | `Error` | `SDEF` 変数間の依存関係・分布参照の規約違反 (§5.8.1) | ・同じ分布番号 `Dn` を複数の `SDEF` 変数で使い回している（`erg=d1 rad=d1`）<br>・自己依存（`erg=ferg d1`）<br>・位置関連変数（`CEL`, `SUR`, `RAD`, `AXS`, `EXT`, `X`, `Y`, `Z`, `CCC`）が `POS` に依存している（`cel=fpos d1`）<br>・2段階以上の従属分布の連鎖（`erg=frad d1 rad=fcel d2`） |
+| **`W511`** | `InconsistentSdefOptions` | `Warning` | `SDEF` オプション間の組み合わせ不整合 (§5.8.1) | ・`PAR=BG`/`BN`/`BP` で `LOC` が未指定<br>・`DAT`/`LOC` を宇宙線（`PAR=CR/CH/CA`）・バックグラウンド（`PAR=BG/BN/BP`）以外の線源で使用<br>・`TR=Dm` に対応する `SIm` カードのオプションが `L`（Discrete）でない |
 
 ---
 
